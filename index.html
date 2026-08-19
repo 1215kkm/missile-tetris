@@ -1,11 +1,11 @@
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>미사일 테트리스</title>
 <style>
   :root { --bg:#0b1220; --panel:#111827; --line:#1f2937; --fg:#e5e7eb; --muted:#9ca3af;
           --violet:#8a38f5; --pink:#ec4899; --orange:#fb923c; }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--fg);
          font-family:Pretendard,-apple-system,"Segoe UI",sans-serif; overflow-x:hidden; }
   .wrap { display:flex; gap:18px; align-items:flex-start; padding:18px; }
@@ -23,7 +23,17 @@
   button { width:100%; padding:9px; border:0; border-radius:9px; cursor:pointer; font-weight:700; color:#fff;
            background:linear-gradient(90deg,var(--violet),var(--pink)); font-family:inherit; font-size:14px; }
   button.ghost { background:#1f2937; border:1px solid var(--line); }
-  .pad { display:none; gap:8px; margin:8px auto 0; }
+  /* 판 위에 떠 있는 상단 표시 — 좁은 화면에서 자리를 차지하지 않게 absolute */
+  .stage { position:relative; display:inline-block; line-height:0; }
+  .hud { position:absolute; left:6px; right:6px; top:6px; display:none; align-items:flex-start;
+         justify-content:space-between; gap:8px; z-index:3; pointer-events:none; line-height:1.25; }
+  .hud .l { background:rgba(11,18,32,.72); border:1px solid var(--line); border-radius:9px; padding:4px 9px; }
+  .hud .l b { font-size:19px; font-weight:800; }
+  .hud .l span { font-size:11px; color:var(--muted); margin-left:6px; }
+  .hud .r { display:flex; gap:6px; pointer-events:auto; }
+  .hud .r button { width:auto; padding:6px 10px; font-size:12px; border-radius:9px; }
+  .pad button span { font-size:12px; margin-left:3px; opacity:.9; }
+  .pad { display:none; gap:7px; margin:7px auto 0; }
   .pad button { flex:1 1 0; padding:15px 0; font-size:19px; background:#1f2937; border:1px solid var(--line); }
   .pad button.f1 { background:linear-gradient(90deg,#f97316,#f59e0b); }
   .pad button.f2 { background:linear-gradient(90deg,#e11d48,#f43f5e); }
@@ -33,18 +43,24 @@
   .over h1 { margin:0 0 6px; font-size:30px; }
   .over p { color:var(--muted); margin:0 0 14px; }
   @media (max-width: 760px), (pointer: coarse) {
-    body { display:block; }
-    .wrap { flex-direction:column; align-items:center; gap:8px; padding:8px; }
-    canvas#cv { width:min(94vw, 56vh); height:auto; }
-    .side { width:min(94vw, 56vh); flex-direction:row; flex-wrap:wrap; gap:6px; }
-    .side .card { flex:1 1 auto; padding:6px 9px; }
-    .side .card.hide-m, #nx { display:none; }
-    .big { font-size:18px; }
-    .pad { display:flex; width:min(94vw, 56vh); }
+    body { display:block; overflow:hidden; }
+    .wrap { flex-direction:column; align-items:center; gap:0; padding:4px 4px 0; }
+    /* 판 높이를 화면에서 버튼 두 줄만큼 뺀 값으로 — 스크롤 없이 한 화면에 들어온다 */
+    canvas#cv { height:calc(100dvh - 130px); width:auto; max-width:96vw; }
+    .side { display:none; }                 /* 옆 패널(점수·다음·키안내·미사일)은 통째로 숨김 */
+    .hud { display:flex; }
+    .pad { display:flex; width:min(96vw, 52vh); }
+    .pad button { padding:13px 0; font-size:17px; }
   }
 </style></head><body>
 <div class="wrap">
-  <canvas id="cv" width="300" height="600"></canvas>
+  <div class="stage">
+    <canvas id="cv" width="300" height="600"></canvas>
+    <div class="hud">
+      <div class="l"><b id="hScore">0</b><span><span id="hLines">0</span>줄 · Lv<span id="hLevel">1</span></span></div>
+      <div class="r"><button id="bgmBtn" class="ghost">♪ 배경음</button><button id="againM">새 게임</button><button id="muteM" class="ghost">🔊</button></div>
+    </div>
+  </div>
   <div class="side">
     <div class="card"><h2>점수</h2><div class="big" id="score">0</div></div>
     <div class="card"><h2>줄 / 레벨</h2><div class="big"><span id="lines">0</span> <span style="color:var(--muted);font-size:15px">/ Lv<span id="level">1</span></span></div></div>
@@ -54,7 +70,6 @@
         <div class="one"><span class="m1">🚀 <span id="ammo1">0</span></span></div>
         <div class="one"><span class="m2">💥 <span id="ammo2">0</span></span></div>
       </div>
-      <div class="keys hide-m" style="margin-top:4px">◆ 든 줄 → 🚀 한 발<br>★ 든 줄 → 💥 한 발(광역)</div>
     </div>
     <div class="card keys hide-m">
       <b>← →</b> 이동 · <b>↑</b> 회전<br><b>↓</b> 빠르게 내리기<br><b>Space</b> 즉시 낙하<br>
@@ -62,14 +77,16 @@
     </div>
     <button id="again">새 게임</button>
     <button id="mute" class="ghost">🔊 소리 켜짐</button>
+    <button id="bgmBtn2" class="ghost">♪ 배경음 바꾸기</button>
   </div>
 </div>
 <div class="pad">
-  <button id="bL">◀</button><button id="bRot">⟳</button><button id="bR">▶</button>
+  <button id="bRot">⟳</button><button id="bFire" class="f1">🚀<span id="a1">3</span></button>
+  <button id="bL">◀</button><button id="bR">▶</button>
 </div>
 <div class="pad">
-  <button id="bDown">▼</button><button id="bDrop">⤓</button>
-  <button id="bFire" class="f1">🚀</button><button id="bBoom" class="f2">💥</button>
+  <button id="bDrop">⤓</button><button id="bBoom" class="f2">💥<span id="a2">1</span></button>
+  <button id="bDown">▼</button>
 </div>
 <div class="over" id="over"><div>
   <h1>게임 오버</h1><p id="final"></p>
@@ -86,6 +103,8 @@ const nx = document.getElementById('nx'), nctx = nx.getContext('2d');
 const Snd = {
   ctx: null, on: true, master: null, musicOn: false, timer: null, step: 0, nextAt: 0,
   init() {
+    // 곡 파일도 첫 조작 때 같이 깨운다 — 브라우저가 자동재생을 막아 시작이 안 되던 것
+    if (typeof bgmEl !== 'undefined' && bgmEl && this.on && bgmEl.paused) bgmEl.play().catch(() => {});
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) { this.on = false; return; }
@@ -159,6 +178,8 @@ const Snd = {
     this.musicOn = true; this.step = 0; clearTimeout(this.timer); tick();
   },
   toggle() {
+    // 곡 파일도 같이 멈추고/재생 (합성음만 끄면 노래가 계속 나온다)
+    setTimeout(() => { if (bgmEl) { if (this.on) bgmEl.play().catch(() => {}); else bgmEl.pause(); } }, 0);
     this.on = !this.on;
     if (this.on) { this.init(); this.musicOn = true; this.startMusic(); }
     else { this.musicOn = false; clearTimeout(this.timer); }
@@ -389,6 +410,11 @@ function draw(sub) {
   document.getElementById('level').textContent = level;
   document.getElementById('ammo1').textContent = ammo1;
   document.getElementById('ammo2').textContent = ammo2;
+  document.getElementById('hScore').textContent = score;
+  document.getElementById('hLines').textContent = lines;
+  document.getElementById('hLevel').textContent = level;
+  document.getElementById('a1').textContent = ammo1;
+  document.getElementById('a2').textContent = ammo2;
 }
 
 /* ─────────── 루프 ─────────── */
@@ -483,19 +509,59 @@ hold('bDrop', act.hard, false); hold('bFire', act.fire, false); hold('bBoom', ac
   }, { passive: true });
 })();
 
+/* 🎵 배경음 — 직접 만든 합성음(기본) 과 실제 곡 3개 중에서 고른다.
+   곡은 mp3 파일로 옆에 두고 필요할 때만 받아온다(첫 로딩을 무겁게 하지 않으려고). */
+const TRACKS = [
+  { id: 'synth', name: '합성음' },
+  { id: 'm1', name: '노래 1', src: 'bgm1.mp3' },
+  { id: 'm2', name: '노래 2', src: 'bgm2.mp3' },
+  { id: 'm3', name: '노래 3', src: 'bgm3.mp3' },
+];
+let bgmIdx = 0, bgmEl = null;
+try { bgmIdx = Math.max(0, Math.min(TRACKS.length - 1, +localStorage.getItem('mt_bgm') || 0)); } catch (e) {}
+function applyBgm() {
+  const t = TRACKS[bgmIdx];
+  try { localStorage.setItem('mt_bgm', String(bgmIdx)); } catch (e) {}
+  const label = '♪ ' + t.name;
+  const b1 = document.getElementById('bgmBtn'), b2 = document.getElementById('bgmBtn2');
+  if (b1) b1.textContent = label;
+  if (b2) b2.textContent = label + ' 바꾸기';
+  if (t.src) {                                  // 실제 곡 — 합성음은 끄고 파일을 반복 재생
+    Snd.musicOn = false; clearTimeout(Snd.timer);
+    if (!bgmEl) { bgmEl = new Audio(); bgmEl.loop = true; bgmEl.volume = 0.42; }
+    if (!bgmEl.src.endsWith(t.src)) bgmEl.src = t.src;
+    if (Snd.on) bgmEl.play().catch(() => {});
+  } else {                                      // 합성음으로 되돌리기
+    if (bgmEl) { bgmEl.pause(); }
+    if (Snd.on) { Snd.musicOn = true; Snd.startMusic(); }
+  }
+}
+const nextBgm = () => { Snd.init(); bgmIdx = (bgmIdx + 1) % TRACKS.length; applyBgm(); };
+
 function reset() {
   board = blank(); score = 0; lines = 0; level = 1; window.level = 1;
-  ammo1 = 0; ammo2 = 0; over = false; paused = false;
+  ammo1 = 3; ammo2 = 1;   /* 기본 지급 */ over = false; paused = false;
   gravity = 800; acc = 0; last = 0; missiles = []; shards = []; shake = 0; hardSlide = 0; softDrop = false;
   next = null; spawn();
   document.getElementById('over').classList.remove('on');
 }
-document.getElementById('again').onclick = () => { Snd.init(); reset(); };
+const newGame = () => { Snd.init(); reset(); };
+document.getElementById('again').onclick = newGame;
+document.getElementById('againM').onclick = newGame;
+document.getElementById('muteM').onclick = () => {
+  Snd.init();
+  const on = Snd.toggle();
+  document.getElementById('muteM').textContent = on ? '🔊' : '🔇';
+  document.getElementById('mute').textContent = on ? '🔊 소리 켜짐' : '🔇 소리 꺼짐';
+};
 document.getElementById('restart').onclick = () => { Snd.init(); reset(); };
 document.getElementById('mute').onclick = () => {
   Snd.init();
   document.getElementById('mute').textContent = Snd.toggle() ? '🔊 소리 켜짐' : '🔇 소리 꺼짐';
 };
 reset();
+document.getElementById('bgmBtn').onclick = nextBgm;
+document.getElementById('bgmBtn2').onclick = nextBgm;
+applyBgm();
 requestAnimationFrame(loop);
 </script></body></html>
