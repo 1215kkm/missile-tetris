@@ -132,6 +132,14 @@ const Snd = {
   fire()   { this.tone(900, 0.22, 'sawtooth', 0.13, 120); },
   boom(big){ this.noise(big ? 0.55 : 0.25, big ? 0.7 : 0.4, big ? 1800 : 1100, 80);
              this.tone(big ? 70 : 110, big ? 0.4 : 0.2, 'square', big ? 0.22 : 0.12, 40); },
+  crumble(rows) {                                    // 블록이 바스러져 쏟아지는 소리
+    const k = Math.min(4, rows || 1);
+    this.noise(0.28 + k * 0.05, 0.10 + k * 0.03, 2600, 320);        // 부서지는 순간
+    for (let i = 0; i < 5 + k * 2; i++) {                            // 자잘한 조각이 튀는 소리
+      setTimeout(() => this.noise(0.05, 0.045, 1400 + Math.random() * 2600, 500), 60 + i * 55 + Math.random() * 40);
+    }
+    setTimeout(() => this.noise(0.5, 0.05, 700, 160), 260);          // 흩날려 떨어지는 잔향
+  },
   levelUp(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => this.tone(f, 0.12, 'triangle', 0.15), i * 60)); },
   over()   { [440, 392, 330, 262, 196].forEach((f, i) => setTimeout(() => this.tone(f, 0.28, 'sawtooth', 0.16), i * 130)); },
   /* 배경음 — 8분음표 격자에 베이스와 아르페지오를 얹은 짧은 루프. 레벨이 오르면 빨라진다. */
@@ -209,22 +217,22 @@ function tryRotate() {                       // 벽에 붙어 있으면 한 칸 
    줄이 지워질 때 블록을 그대로 없애지 않고, 한 칸을 작은 파편 4개로 쪼개
    왼쪽부터 차례로 튀어오르며 떨어지게 한다 (글자가 조각나 흩어지듯). */
 function shatterCell(px, py, color, delay, power, burst) {
-  const N = 4, q = CELL / N;                 // 한 칸을 4x4 = 16 조각으로 잘게 쪼갠다
-  for (let iy = 0; iy < N; iy++) for (let ix = 0; ix < N; ix++) {
+  const NX = 8, NY = 4, qx = CELL / NX, qy = CELL / NY;   // 한 칸을 8x4 = 32 조각으로
+  for (let iy = 0; iy < NY; iy++) for (let ix = 0; ix < NX; ix++) {
     // 가운데에서 바깥으로 밀려나듯 — 조각이 제자리에 뭉치지 않고 흩어진다
-    const cx = (ix + 0.5) / N - 0.5, cy = (iy + 0.5) / N - 0.5;
+    const cx = (ix + 0.5) / NX - 0.5, cy = (iy + 0.5) / NY - 0.5;
     shards.push({
-      x: px * CELL + ix * q, y: py * CELL + iy * q,
+      x: px * CELL + ix * qx, y: py * CELL + iy * qy,
       vx: cx * (burst ? (power || 2.2) * 2.2 : 1.6) + (Math.random() - 0.5) * 0.6,
       vy: burst ? (cy * (power || 2.2) * 1.6 - Math.random() * 1.2)
                 : (Math.random() * 0.6 + 0.15 + cy * 0.5),
       rot: 0, vr: (Math.random() - 0.5) * (burst ? 0.5 : 0.25),
-      size: q, color, life: 1, delay: (delay || 0) + iy * 8,
+      w: qx, h: qy, size: qx, color, life: 1, delay: (delay || 0) + iy * 8,
     });
   }
 }
 // 한 번에 너무 많으면(4줄 동시 삭제 = 640조각) 폰에서 버벅인다 — 오래된 것부터 정리
-function capShards() { if (shards.length > 1200) shards.splice(0, shards.length - 1200); }
+function capShards() { if (shards.length > 2400) shards.splice(0, shards.length - 2400); }
 function shatterRow(y) {
   for (let x = 0; x < COLS; x++) {
     const c = board[y][x];
@@ -261,7 +269,7 @@ function clearLines() {
   const nl = Math.floor(lines / 10) + 1;
   if (nl !== level) { level = nl; window.level = level; Snd.levelUp(); }
   gravity = Math.max(90, 800 - (level - 1) * 70);
-  Snd.clear(full.length);
+  Snd.clear(full.length); Snd.crumble(full.length);
 }
 
 /* ─────────── 미사일 ─────────── */
@@ -285,7 +293,7 @@ function explode(row, col, big) {
     board[y][x] = null; hit++;
   }
   score += hit * (big ? 40 : 20);
-  if (hit || big) { Snd.boom(big); shake = big ? 16 : 6; }
+  if (hit || big) { Snd.boom(big); Snd.crumble(big ? 3 : 1); shake = big ? 16 : 6; }
   return hit;
 }
 function stepMissiles(dt) {
@@ -364,8 +372,8 @@ function draw(sub) {
   for (const s of shards) {                                  // 부서진 파편
     if (s.delay > 0) continue;
     ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, s.life));
-    ctx.translate(s.x + s.size / 2, s.y + s.size / 2); ctx.rotate(s.rot);
-    ctx.fillStyle = s.color; ctx.fillRect(-s.size / 2, -s.size / 2, s.size - 1, s.size - 1);
+    ctx.translate(s.x + (s.w || s.size) / 2, s.y + (s.h || s.size) / 2); ctx.rotate(s.rot);
+    ctx.fillStyle = s.color; ctx.fillRect(-(s.w || s.size) / 2, -(s.h || s.size) / 2, (s.w || s.size) - 0.5, (s.h || s.size) - 0.5);
     ctx.restore();
   }
   ctx.restore();
@@ -396,7 +404,9 @@ function loop(t) {
     } else {
       const g = softDrop ? 45 : gravity;               // ↓ 누르는 동안은 아주 빠르게, 대신 부드럽게
       acc += dt;
-      while (acc >= g) { acc -= g; if (softDrop) score += 1; stepDown(); if (over) break; }
+      let guard = 0;
+      while (acc >= g && guard++ < 2) { acc -= g; if (softDrop) score += 1; stepDown(); if (over) break; }
+      if (acc > g) acc = g;                    // 탭 전환 등으로 시간이 크게 밀렸어도 몰아서 떨어뜨리지 않는다
       if (cur && !collide(cur, 0, 1)) sub = Math.min(0.999, acc / g);
     }
     if (missiles.length) stepMissiles(dt);
@@ -412,7 +422,10 @@ const act = {
   left:  () => { if (!collide(cur, -1, 0)) { cur.x--; Snd.move(); } },
   right: () => { if (!collide(cur, 1, 0)) { cur.x++; Snd.move(); } },
   rot:   () => tryRotate(),
-  soft:  on => { softDrop = on; },
+  soft:  on => {                       // 느린 낙하 도중 눌러도 '그동안 쌓인 시간' 이 한꺼번에 소비되지 않게
+    if (on && !softDrop) acc = Math.min(acc, 45);
+    softDrop = on;
+  },
   hard:  () => hardDrop(),
   fire:  () => fire(false),
   boom:  () => fire(true),
