@@ -39,6 +39,14 @@
   .pad button.f2 { background:linear-gradient(90deg,#e11d48,#f43f5e); }
   .over { position:fixed; inset:0; display:none; place-items:center; background:rgba(2,6,23,.86); z-index:9; }
   .over.on { display:grid; }
+  /* 첫 탭 전까지 덮는 시작 화면 — 브라우저는 사용자가 한 번 눌러야 소리를 내준다 */
+  .start { position:fixed; inset:0; display:grid; place-items:center; z-index:12; background:rgba(2,6,23,.9); }
+  .start.off { display:none; }
+  .start .b { text-align:center; }
+  .start h1 { margin:0 0 6px; font-size:26px; }
+  .start p { color:var(--muted); margin:0 0 16px; font-size:13px; line-height:1.7; }
+  .start button { width:220px; padding:14px; font-size:16px; }
+  .ver { position:fixed; right:6px; bottom:4px; font-size:10px; color:#334155; z-index:20; }
   .over div { text-align:center; }
   .over h1 { margin:0 0 6px; font-size:30px; }
   .over p { color:var(--muted); margin:0 0 14px; }
@@ -88,6 +96,12 @@
   <button id="bDrop">⤓</button><button id="bBoom" class="f2">💥<span id="a2">1</span></button>
   <button id="bDown">▼</button>
 </div>
+<div class="start" id="start"><div class="b">
+  <h1>미사일 테트리스</h1>
+  <p>◆ 든 줄을 지우면 🚀 · ★ 든 줄을 지우면 💥<br>아래로 쏴서 막힌 자리를 뚫으세요<br><b>소리와 배경음이 함께 켜집니다</b></p>
+  <button id="startBtn">▶ 탭해서 시작</button>
+</div></div>
+<div class="ver">v5</div>
 <div class="over" id="over"><div>
   <h1>게임 오버</h1><p id="final"></p>
   <button id="restart" style="width:180px;margin:0 auto">다시 하기</button>
@@ -563,5 +577,14 @@ reset();
 document.getElementById('bgmBtn').onclick = nextBgm;
 document.getElementById('bgmBtn2').onclick = nextBgm;
 applyBgm();
+const startEl = document.getElementById('start');
+const startGame = () => {                       // 첫 탭 — 여기서 소리·배경음을 깨운다
+  Snd.init(); applyBgm();
+  if (bgmEl && Snd.on) bgmEl.play().catch(() => {});
+  startEl.classList.add('off');
+  reset();
+};
+document.getElementById('startBtn').onclick = startGame;
+startEl.addEventListener('pointerdown', e => { if (e.target.id !== 'startBtn') startGame(); });
 requestAnimationFrame(loop);
 </script></body></html>
