@@ -209,29 +209,34 @@ function tryRotate() {                       // 벽에 붙어 있으면 한 칸 
    줄이 지워질 때 블록을 그대로 없애지 않고, 한 칸을 작은 파편 4개로 쪼개
    왼쪽부터 차례로 튀어오르며 떨어지게 한다 (글자가 조각나 흩어지듯). */
 function shatterCell(px, py, color, delay, power, burst) {
-  const half = CELL / 2;
-  for (let i = 0; i < 4; i++) {
+  const N = 4, q = CELL / N;                 // 한 칸을 4x4 = 16 조각으로 잘게 쪼갠다
+  for (let iy = 0; iy < N; iy++) for (let ix = 0; ix < N; ix++) {
+    // 가운데에서 바깥으로 밀려나듯 — 조각이 제자리에 뭉치지 않고 흩어진다
+    const cx = (ix + 0.5) / N - 0.5, cy = (iy + 0.5) / N - 0.5;
     shards.push({
-      x: px * CELL + (i % 2) * half, y: py * CELL + ((i / 2) | 0) * half,
-      // burst(폭발)면 사방으로 튀고, 아니면(줄 지우기) 제자리에서 바스러져 아래로 흘러내린다
-      vx: (Math.random() - 0.5) * (burst ? (power || 2.2) : 0.55),
-      vy: burst ? (-Math.random() * (power || 2.2) * 0.8 - 0.5) : (Math.random() * 0.45 + 0.1),
-      rot: 0, vr: (Math.random() - 0.5) * (burst ? 0.35 : 0.12),
-      size: half, color, life: 1, delay: delay || 0,
+      x: px * CELL + ix * q, y: py * CELL + iy * q,
+      vx: cx * (burst ? (power || 2.2) * 2.2 : 1.6) + (Math.random() - 0.5) * 0.6,
+      vy: burst ? (cy * (power || 2.2) * 1.6 - Math.random() * 1.2)
+                : (Math.random() * 0.6 + 0.15 + cy * 0.5),
+      rot: 0, vr: (Math.random() - 0.5) * (burst ? 0.5 : 0.25),
+      size: q, color, life: 1, delay: (delay || 0) + iy * 8,
     });
   }
 }
+// 한 번에 너무 많으면(4줄 동시 삭제 = 640조각) 폰에서 버벅인다 — 오래된 것부터 정리
+function capShards() { if (shards.length > 1200) shards.splice(0, shards.length - 1200); }
 function shatterRow(y) {
   for (let x = 0; x < COLS; x++) {
     const c = board[y][x];
     if (c) shatterCell(x, y, c.c, x * 45);       // 왼쪽부터 45ms 씩 늦게 = 한 칸씩 차례로 부서짐
   }
+  capShards();
 }
 function stepShards(dt) {
   for (const s of shards) {
     if (s.delay > 0) { s.delay -= dt; continue; }
     const k = dt / 16.7;                                   // 60fps 기준 환산 — 주사율이 달라도 같은 속도
-    s.vy += 0.08 * k; s.x += s.vx * 0.5 * k; s.y += s.vy * 0.52 * k; s.rot += s.vr * 0.5 * k;
+    s.vy += 0.16 * k; s.x += s.vx * 1.0 * k; s.y += s.vy * 1.04 * k; s.rot += s.vr * 1.0 * k;   // 지금보다 2배 빠르게
     if (s.y > cv.height) s.life = 0;
     s.life -= dt / 4200;
   }
