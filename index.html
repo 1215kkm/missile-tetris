@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>미사일 테트리스</title>
+<style>
+  :root { --bg:#0b1220; --panel:#111827; --line:#1f2937; --fg:#e5e7eb; --muted:#9ca3af;
+          --violet:#8a38f5; --pink:#ec4899; --orange:#fb923c; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--fg);
+         font-family:Pretendard,-apple-system,"Segoe UI",sans-serif; overflow-x:hidden; }
+  .wrap { display:flex; gap:18px; align-items:flex-start; padding:18px; }
+  canvas { background:#0f172a; border:2px solid var(--line); border-radius:12px; display:block; touch-action:none; }
+  .side { width:180px; display:flex; flex-direction:column; gap:10px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 13px; }
+  .card h2 { margin:0 0 5px; font-size:11px; color:var(--muted); font-weight:600; letter-spacing:.4px; }
+  .big { font-size:23px; font-weight:800; line-height:1.1; }
+  .keys { font-size:11.5px; color:var(--muted); line-height:1.85; }
+  .keys b { color:var(--fg); }
+  .ammo-row { display:flex; gap:10px; align-items:center; }
+  .ammo-row .one { flex:1 1 0; }
+  .m1 { color:var(--orange); font-weight:800; }
+  .m2 { color:#f43f5e; font-weight:800; }
+  button { width:100%; padding:9px; border:0; border-radius:9px; cursor:pointer; font-weight:700; color:#fff;
+           background:linear-gradient(90deg,var(--violet),var(--pink)); font-family:inherit; font-size:14px; }
+  button.ghost { background:#1f2937; border:1px solid var(--line); }
+  .pad { display:none; gap:8px; margin:8px auto 0; }
+  .pad button { flex:1 1 0; padding:15px 0; font-size:19px; background:#1f2937; border:1px solid var(--line); }
+  .pad button.f1 { background:linear-gradient(90deg,#f97316,#f59e0b); }
+  .pad button.f2 { background:linear-gradient(90deg,#e11d48,#f43f5e); }
+  .over { position:fixed; inset:0; display:none; place-items:center; background:rgba(2,6,23,.86); z-index:9; }
+  .over.on { display:grid; }
+  .over div { text-align:center; }
+  .over h1 { margin:0 0 6px; font-size:30px; }
+  .over p { color:var(--muted); margin:0 0 14px; }
+  @media (max-width: 760px), (pointer: coarse) {
+    body { display:block; }
+    .wrap { flex-direction:column; align-items:center; gap:8px; padding:8px; }
+    canvas#cv { width:min(94vw, 56vh); height:auto; }
+    .side { width:min(94vw, 56vh); flex-direction:row; flex-wrap:wrap; gap:6px; }
+    .side .card { flex:1 1 auto; padding:6px 9px; }
+    .side .card.hide-m, #nx { display:none; }
+    .big { font-size:18px; }
+    .pad { display:flex; width:min(94vw, 56vh); }
+  }
+</style></head><body>
+<div class="wrap">
+  <canvas id="cv" width="300" height="600"></canvas>
+  <div class="side">
+    <div class="card"><h2>점수</h2><div class="big" id="score">0</div></div>
+    <div class="card"><h2>줄 / 레벨</h2><div class="big"><span id="lines">0</span> <span style="color:var(--muted);font-size:15px">/ Lv<span id="level">1</span></span></div></div>
+    <div class="card hide-m"><h2>다음</h2><canvas id="nx" width="130" height="92"></canvas></div>
+    <div class="card"><h2>미사일</h2>
+      <div class="ammo-row">
+        <div class="one"><span class="m1">🚀 <span id="ammo1">0</span></span></div>
+        <div class="one"><span class="m2">💥 <span id="ammo2">0</span></span></div>
+      </div>
+      <div class="keys hide-m" style="margin-top:4px">◆ 든 줄 → 🚀 한 발<br>★ 든 줄 → 💥 한 발(광역)</div>
+    </div>
+    <div class="card keys hide-m">
+      <b>← →</b> 이동 · <b>↑</b> 회전<br><b>↓</b> 빠르게 내리기<br><b>Space</b> 즉시 낙하<br>
+      <b class="m1">F</b> 미사일 · <b class="m2">G</b> 대형미사일<br><b>P</b> 일시정지 · <b>M</b> 소리
+    </div>
+    <button id="again">새 게임</button>
+    <button id="mute" class="ghost">🔊 소리 켜짐</button>
+  </div>
+</div>
+<div class="pad">
+  <button id="bL">◀</button><button id="bRot">⟳</button><button id="bR">▶</button>
+</div>
+<div class="pad">
+  <button id="bDown">▼</button><button id="bDrop">⤓</button>
+  <button id="bFire" class="f1">🚀</button><button id="bBoom" class="f2">💥</button>
+</div>
+<div class="over" id="over"><div>
+  <h1>게임 오버</h1><p id="final"></p>
+  <button id="restart" style="width:180px;margin:0 auto">다시 하기</button>
+</div></div>
+<script>
+/* ─────────── 판 크기 ─────────── */
+const COLS = 10, ROWS = 20, CELL = 30;
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const nx = document.getElementById('nx'), nctx = nx.getContext('2d');
+
+/* ─────────── 소리 — 파일 없이 WebAudio 로 직접 만든다 (단일 파일 유지) ───────────
+   브라우저는 사용자가 한 번 건드리기 전엔 소리를 못 내므로, 첫 조작 때 깨운다. */
+const Snd = {
+  ctx: null, on: true, master: null, musicOn: false, timer: null, step: 0, nextAt: 0,
+  init() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { this.on = false; return; }
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.9;
+    this.master.connect(this.ctx.destination);
+    this.startMusic();
+  },
+  tone(freq, dur, type, gain, slideTo) {
+    if (!this.on || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = type || 'square';
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(30, slideTo), t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain || 0.18, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + dur + 0.02);
+  },
+  noise(dur, gain, cutoff, sweepTo) {       // 폭발음 — 화이트노이즈를 필터로 깎아 쓴다
+    if (!this.on || !this.ctx) return;
+    const t = this.ctx.currentTime, n = Math.floor(this.ctx.sampleRate * dur);
+    const buf = this.ctx.createBuffer(1, n, this.ctx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const src = this.ctx.createBufferSource(); src.buffer = buf;
+    const f = this.ctx.createBiquadFilter(); f.type = 'lowpass';
+    f.frequency.setValueAtTime(cutoff || 1200, t);
+    if (sweepTo) f.frequency.exponentialRampToValueAtTime(Math.max(60, sweepTo), t + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(gain || 0.5, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(this.master);
+    src.start(t);
+  },
+  move()   { this.tone(180, 0.05, 'square', 0.07); },
+  rot()    { this.tone(340, 0.06, 'triangle', 0.1); },
+  land()   { this.tone(120, 0.09, 'square', 0.12, 70); },
+  hard()   { this.tone(90, 0.12, 'sawtooth', 0.14, 50); this.noise(0.1, 0.25, 900, 200); },
+  clear(n) { const base = 440;                         // 지운 줄 수만큼 음이 올라간다
+             for (let i = 0; i < n + 1; i++) setTimeout(() => this.tone(base * Math.pow(1.26, i), 0.13, 'triangle', 0.16), i * 70); },
+  fire()   { this.tone(900, 0.22, 'sawtooth', 0.13, 120); },
+  boom(big){ this.noise(big ? 0.55 : 0.25, big ? 0.7 : 0.4, big ? 1800 : 1100, 80);
+             this.tone(big ? 70 : 110, big ? 0.4 : 0.2, 'square', big ? 0.22 : 0.12, 40); },
+  levelUp(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => this.tone(f, 0.12, 'triangle', 0.15), i * 60)); },
+  over()   { [440, 392, 330, 262, 196].forEach((f, i) => setTimeout(() => this.tone(f, 0.28, 'sawtooth', 0.16), i * 130)); },
+  /* 배경음 — 8분음표 격자에 베이스와 아르페지오를 얹은 짧은 루프. 레벨이 오르면 빨라진다. */
+  startMusic() {
+    const BASS = [55, 55, 73.42, 73.42, 65.41, 65.41, 82.41, 82.41];              // A1 A1 D2 D2 C2 C2 E2 E2
+    const ARP  = [440, 523.25, 659.25, 523.25, 587.33, 698.46, 880, 698.46,
+                  392, 523.25, 659.25, 523.25, 659.25, 830.61, 987.77, 830.61];
+    const tick = () => {
+      if (!this.on || !this.ctx || !this.musicOn) return;
+      const s = this.step++;
+      const beat = 0.5 - Math.min(0.18, (window.level || 1) * 0.012);              // 레벨↑ = 템포↑
+      if (s % 2 === 0) this.tone(BASS[(s / 2) % BASS.length], beat * 1.7, 'triangle', 0.11);
+      this.tone(ARP[s % ARP.length], beat * 0.7, 'square', 0.045);
+      if (s % 8 === 0) this.noise(0.05, 0.09, 4000);                               // 하이햇 느낌
+      this.timer = setTimeout(tick, beat * 1000);
+    };
+    this.musicOn = true; this.step = 0; clearTimeout(this.timer); tick();
+  },
+  toggle() {
+    this.on = !this.on;
+    if (this.on) { this.init(); this.musicOn = true; this.startMusic(); }
+    else { this.musicOn = false; clearTimeout(this.timer); }
+    return this.on;
+  },
+};
+
+/* ─────────── 조각 ─────────── */
+const SHAPES = {
+  I: { c:'#22d3ee', m:[[1,1,1,1]] },
+  O: { c:'#fde047', m:[[1,1],[1,1]] },
+  T: { c:'#c084fc', m:[[0,1,0],[1,1,1]] },
+  S: { c:'#4ade80', m:[[0,1,1],[1,1,0]] },
+  Z: { c:'#fb7185', m:[[1,1,0],[0,1,1]] },
+  J: { c:'#60a5fa', m:[[1,0,0],[1,1,1]] },
+  L: { c:'#fb923c', m:[[0,0,1],[1,1,1]] },
+};
+const KEYS = Object.keys(SHAPES);
+// 칸 값: 1=보통 2=◆(미사일) 3=★(대형미사일)
+let board, cur, next, score, lines, level, ammo1, ammo2, over, paused;
+let gravity, acc, last, missiles, shards, shake, hardSlide, softDrop;
+
+function blank() { return Array.from({ length: ROWS }, () => Array(COLS).fill(null)); }
+function newPiece() {
+  const k = KEYS[(Math.random() * KEYS.length) | 0];
+  const m = SHAPES[k].m.map(r => r.slice());
+  const cells = [];
+  m.forEach((row, y) => row.forEach((v, x) => { if (v) cells.push([y, x]); }));
+  const r = Math.random();
+  if (r < 0.06) { const [y, x] = cells[(Math.random() * cells.length) | 0]; m[y][x] = 3; }       // ★ 대형
+  else if (r < 0.22) { const [y, x] = cells[(Math.random() * cells.length) | 0]; m[y][x] = 2; }  // ◆ 일반
+  return { k, m, c: SHAPES[k].c, x: ((COLS - m[0].length) / 2) | 0, y: 0 };
+}
+function collide(p, dx, dy, mm) {
+  const m = mm || p.m;
+  for (let y = 0; y < m.length; y++) for (let x = 0; x < m[y].length; x++) {
+    if (!m[y][x]) continue;
+    const px = p.x + x + dx, py = p.y + y + dy;
+    if (px < 0 || px >= COLS || py >= ROWS) return true;
+    if (py >= 0 && board[py][px]) return true;
+  }
+  return false;
+}
+function rotate(m) {
+  const h = m.length, w = m[0].length;
+  const out = Array.from({ length: w }, () => Array(h).fill(0));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out[x][h - 1 - y] = m[y][x];
+  return out;
+}
+function tryRotate() {                       // 벽에 붙어 있으면 한 칸 밀어서라도 돌려 준다
+  const r = rotate(cur.m);
+  for (const dx of [0, -1, 1, -2, 2]) if (!collide(cur, dx, 0, r)) { cur.m = r; cur.x += dx; Snd.rot(); return; }
+}
+
+/* ─────────── 부서지는 조각 ───────────
+   줄이 지워질 때 블록을 그대로 없애지 않고, 한 칸을 작은 파편 4개로 쪼개
+   왼쪽부터 차례로 튀어오르며 떨어지게 한다 (글자가 조각나 흩어지듯). */
+function shatterCell(px, py, color, delay, power, burst) {
+  const half = CELL / 2;
+  for (let i = 0; i < 4; i++) {
+    shards.push({
+      x: px * CELL + (i % 2) * half, y: py * CELL + ((i / 2) | 0) * half,
+      // burst(폭발)면 사방으로 튀고, 아니면(줄 지우기) 제자리에서 바스러져 아래로 흘러내린다
+      vx: (Math.random() - 0.5) * (burst ? (power || 2.2) : 0.55),
+      vy: burst ? (-Math.random() * (power || 2.2) * 0.8 - 0.5) : (Math.random() * 0.45 + 0.1),
+      rot: 0, vr: (Math.random() - 0.5) * (burst ? 0.35 : 0.12),
+      size: half, color, life: 1, delay: delay || 0,
+    });
+  }
+}
+function shatterRow(y) {
+  for (let x = 0; x < COLS; x++) {
+    const c = board[y][x];
+    if (c) shatterCell(x, y, c.c, x * 45);       // 왼쪽부터 45ms 씩 늦게 = 한 칸씩 차례로 부서짐
+  }
+}
+function stepShards(dt) {
+  for (const s of shards) {
+    if (s.delay > 0) { s.delay -= dt; continue; }
+    const k = dt / 16.7;                                   // 60fps 기준 환산 — 주사율이 달라도 같은 속도
+    s.vy += 0.08 * k; s.x += s.vx * 0.5 * k; s.y += s.vy * 0.52 * k; s.rot += s.vr * 0.5 * k;
+    if (s.y > cv.height) s.life = 0;
+    s.life -= dt / 4200;
+  }
+  shards = shards.filter(s => s.life > 0);
+}
+
+/* ─────────── 줄 지우기 ─────────── */
+function clearLines() {
+  const full = [];
+  for (let y = 0; y < ROWS; y++) if (board[y].every(Boolean)) full.push(y);
+  if (!full.length) return;
+  let got1 = 0, got2 = 0;
+  for (const y of full) {
+    if (board[y].some(c => c && c.item === 2)) got1++;
+    if (board[y].some(c => c && c.item === 3)) got2++;
+    shatterRow(y);
+  }
+  for (const y of full) { board.splice(y, 1); board.unshift(Array(COLS).fill(null)); }
+  lines += full.length;
+  score += [0, 100, 300, 500, 800][full.length] || 800;
+  ammo1 += got1; ammo2 += got2;
+  const nl = Math.floor(lines / 10) + 1;
+  if (nl !== level) { level = nl; window.level = level; Snd.levelUp(); }
+  gravity = Math.max(90, 800 - (level - 1) * 70);
+  Snd.clear(full.length);
+}
+
+/* ─────────── 미사일 ─────────── */
+function fire(big) {
+  if (over || paused) return;
+  if (big ? !ammo2 : !ammo1) return;
+  if (big) ammo2--; else ammo1--;
+  const col = Math.min(COLS - 1, Math.max(0, cur.x + ((cur.m[0].length / 2) | 0)));
+  missiles.push({ col, y: cur.y + cur.m.length, big: !!big });
+  Snd.fire();
+}
+function explode(row, col, big) {
+  const R = big ? 2 : 0;                       // 대형은 반경 2 (5x5 안쪽 원)
+  let hit = 0;
+  for (let y = row - R; y <= row + R; y++) for (let x = col - R; x <= col + R; x++) {
+    if (y < 0 || y >= ROWS || x < 0 || x >= COLS) continue;
+    if (big && (y - row) * (y - row) + (x - col) * (x - col) > R * R + 1) continue;
+    const c = board[y][x];
+    if (!c) continue;
+    shatterCell(x, y, c.c, 0, big ? 5 : 2.6, true);
+    board[y][x] = null; hit++;
+  }
+  score += hit * (big ? 40 : 20);
+  if (hit || big) { Snd.boom(big); shake = big ? 16 : 6; }
+  return hit;
+}
+function stepMissiles(dt) {
+  for (const ms of missiles) {
+    if (ms.dead) continue;
+    // 초당 몇 칸으로 움직인다 — 프레임당으로 하면 144Hz 화면에서 2배 넘게 빨라진다
+    const spd = (ms.big ? 6 : 20) * (dt / 1000);   // 대형은 일반의 1/3 이상 느리게
+    const from = ms.y, to = ms.y + spd;
+    /* 지나온 줄을 하나도 빠뜨리지 않고 검사한다 — 예전엔 한 번에 1.5칸씩 건너뛰어서
+       블록이 있는 줄을 그냥 통과해 버렸다 (= 미사일을 쏴도 아무 일도 안 일어남). */
+    for (let r = Math.max(0, Math.ceil(from)); r <= Math.floor(to) && r < ROWS; r++) {
+      if (board[r][ms.col]) { explode(r, ms.col, ms.big); ms.dead = true; break; }
+    }
+    ms.y = to;
+  }
+  missiles = missiles.filter(m => !m.dead && m.y < ROWS + 1);
+}
+/* ─────────── 낙하 ─────────── */
+function merge(p) {
+  p.m.forEach((row, y) => row.forEach((v, x) => {
+    if (v && p.y + y >= 0) board[p.y + y][p.x + x] = { c: p.c, item: v };
+  }));
+}
+function lock() { merge(cur); Snd.land(); clearLines(); spawn(); }
+function spawn() {
+  cur = next || newPiece(); next = newPiece(); acc = 0; hardSlide = 0;
+  if (collide(cur, 0, 0)) {
+    over = true; Snd.over();
+    document.getElementById('over').classList.add('on');
+    document.getElementById('final').textContent = '점수 ' + score + ' · ' + lines + '줄 · Lv' + level;
+  }
+}
+function stepDown() { if (collide(cur, 0, 1)) lock(); else cur.y++; }
+function hardDrop() {                                  // 즉시가 아니라 '아주 빠르게 미끄러져' 내려간다
+  if (hardSlide) return;
+  hardSlide = 1; Snd.hard();
+}
+
+/* ─────────── 그리기 ─────────── */
+function cellBox(g, px, py, color, item, size) {
+  const s = size || CELL;
+  g.fillStyle = color; g.fillRect(px + 1, py + 1, s - 2, s - 2);
+  g.fillStyle = 'rgba(255,255,255,.20)'; g.fillRect(px + 1, py + 1, s - 2, Math.max(3, s * 0.13));
+  g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(px + 1, py + s - 5, s - 2, 4);
+  if (item === 2 || item === 3) {
+    g.fillStyle = item === 3 ? '#7f1d1d' : '#0b1220';
+    g.font = 'bold ' + Math.round(s * 0.55) + 'px sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(item === 3 ? '★' : '◆', px + s / 2, py + s / 2 + 1);
+  }
+}
+function draw(sub) {
+  ctx.save();
+  if (shake > 0) { ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake); }
+  ctx.fillStyle = '#0f172a'; ctx.fillRect(-20, -20, cv.width + 40, cv.height + 40);
+  ctx.strokeStyle = 'rgba(148,163,184,.08)'; ctx.lineWidth = 1;
+  for (let x = 1; x < COLS; x++) { ctx.beginPath(); ctx.moveTo(x * CELL, 0); ctx.lineTo(x * CELL, cv.height); ctx.stroke(); }
+  for (let y = 1; y < ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * CELL); ctx.lineTo(cv.width, y * CELL); ctx.stroke(); }
+  board.forEach((row, y) => row.forEach((c, x) => { if (c) cellBox(ctx, x * CELL, y * CELL, c.c, c.item); }));
+  if (cur && !over) {
+    let gy = 0; while (!collide(cur, 0, gy + 1)) gy++;
+    ctx.globalAlpha = .18;                                   // 착지 위치 미리보기
+    cur.m.forEach((row, y) => row.forEach((v, x) => { if (v) cellBox(ctx, (cur.x + x) * CELL, (cur.y + y + gy) * CELL, cur.c, 0); }));
+    ctx.globalAlpha = 1;
+    const off = sub * CELL;                                  // 칸 사이를 부드럽게 (뚝뚝 끊기지 않게)
+    cur.m.forEach((row, y) => row.forEach((v, x) => { if (v) cellBox(ctx, (cur.x + x) * CELL, (cur.y + y) * CELL + off, cur.c, v); }));
+  }
+  for (const ms of missiles) {                               // 🚀 / 💥
+    const cx = ms.col * CELL + CELL / 2, cy = ms.y * CELL, w = ms.big ? 11 : 6;
+    ctx.fillStyle = ms.big ? 'rgba(244,63,94,.35)' : 'rgba(251,146,60,.30)';
+    ctx.fillRect(cx - w / 2, cy - 30, w, 26);
+    ctx.fillStyle = ms.big ? '#f43f5e' : '#fb923c';
+    ctx.beginPath(); ctx.moveTo(cx, cy + (ms.big ? 18 : 12));
+    ctx.lineTo(cx - w, cy - 8); ctx.lineTo(cx + w, cy - 8); ctx.closePath(); ctx.fill();
+  }
+  for (const s of shards) {                                  // 부서진 파편
+    if (s.delay > 0) continue;
+    ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, s.life));
+    ctx.translate(s.x + s.size / 2, s.y + s.size / 2); ctx.rotate(s.rot);
+    ctx.fillStyle = s.color; ctx.fillRect(-s.size / 2, -s.size / 2, s.size - 1, s.size - 1);
+    ctx.restore();
+  }
+  ctx.restore();
+
+  nctx.clearRect(0, 0, nx.width, nx.height);
+  if (next) {
+    const w = next.m[0].length, h = next.m.length, s = 24;
+    const ox = (nx.width - w * s) / 2, oy = (nx.height - h * s) / 2;
+    next.m.forEach((row, y) => row.forEach((v, x) => { if (v) cellBox(nctx, ox + x * s, oy + y * s, next.c, v, s); }));
+  }
+  document.getElementById('score').textContent = score;
+  document.getElementById('lines').textContent = lines;
+  document.getElementById('level').textContent = level;
+  document.getElementById('ammo1').textContent = ammo1;
+  document.getElementById('ammo2').textContent = ammo2;
+}
+
+/* ─────────── 루프 ─────────── */
+function loop(t) {
+  if (!last) last = t;
+  const dt = Math.min(50, t - last); last = t;
+  let sub = 0;
+  if (!over && !paused) {
+    if (hardSlide) {                                   // 즉시낙하 — 6ms 마다 한 칸씩 주르륵
+      hardSlide += dt;
+      while (hardSlide > 6) { if (collide(cur, 0, 1)) { hardSlide = 0; lock(); break; } cur.y++; score += 1; hardSlide -= 6; }
+      if (hardSlide) hardSlide = Math.max(1, hardSlide);
+    } else {
+      const g = softDrop ? 45 : gravity;               // ↓ 누르는 동안은 아주 빠르게, 대신 부드럽게
+      acc += dt;
+      while (acc >= g) { acc -= g; if (softDrop) score += 1; stepDown(); if (over) break; }
+      if (cur && !collide(cur, 0, 1)) sub = Math.min(0.999, acc / g);
+    }
+    if (missiles.length) stepMissiles(dt);
+  }
+  if (shards.length) stepShards(dt);
+  if (shake > 0) shake = Math.max(0, shake - dt * 0.06);
+  draw(sub);
+  requestAnimationFrame(loop);
+}
+
+/* ─────────── 조작 ─────────── */
+const act = {
+  left:  () => { if (!collide(cur, -1, 0)) { cur.x--; Snd.move(); } },
+  right: () => { if (!collide(cur, 1, 0)) { cur.x++; Snd.move(); } },
+  rot:   () => tryRotate(),
+  soft:  on => { softDrop = on; },
+  hard:  () => hardDrop(),
+  fire:  () => fire(false),
+  boom:  () => fire(true),
+};
+addEventListener('keydown', e => {
+  Snd.init();
+  const k = e.key.toLowerCase();
+  if (k === 'm') { document.getElementById('mute').textContent = Snd.toggle() ? '🔊 소리 켜짐' : '🔇 소리 꺼짐'; return; }
+  if (over) { if (e.code === 'Space' || k === 'enter') reset(); return; }
+  if (k === 'p') { paused = !paused; return; }
+  if (paused) return;
+  if (e.key === 'ArrowLeft') act.left();
+  else if (e.key === 'ArrowRight') act.right();
+  else if (e.key === 'ArrowDown') act.soft(true);
+  else if (e.key === 'ArrowUp') act.rot();
+  else if (e.code === 'Space') act.hard();
+  else if (k === 'f') { if (!e.repeat) act.fire(); }        // 꾹 눌러도 한 발만
+  else if (k === 'g') { if (!e.repeat) act.boom(); }
+  else return;
+  e.preventDefault();
+});
+addEventListener('keyup', e => { if (e.key === 'ArrowDown') act.soft(false); });
+
+const hold = (id, fn, repeat, upFn) => {                 // 📱 버튼 — 꾹 누르면 반복
+  const el = document.getElementById(id); if (!el) return;
+  let t = null, iv = null;
+  const go = ev => { ev.preventDefault(); Snd.init(); if (over || paused) return; fn();
+    if (repeat) { t = setTimeout(() => { iv = setInterval(() => { if (!over && !paused) fn(); }, 80); }, 240); } };
+  const stop = () => { clearTimeout(t); clearInterval(iv); t = iv = null; if (upFn) upFn(); };
+  // 포인터 이벤트 하나로만 받는다 — touchstart 와 mousedown 을 같이 달면 한 번 눌러도 두 번 실행됐다
+  el.addEventListener('pointerdown', go);
+  ['pointerup','pointercancel','pointerleave'].forEach(e => el.addEventListener(e, stop));
+};
+hold('bL', act.left, true); hold('bR', act.right, true); hold('bRot', act.rot, false);
+hold('bDown', () => act.soft(true), false, () => act.soft(false));
+hold('bDrop', act.hard, false); hold('bFire', act.fire, false); hold('bBoom', act.boom, false);
+
+(() => {                                                  // 📱 판 위 스와이프
+  let sx = 0, sy = 0, st = 0, moved = 0;
+  cv.addEventListener('touchstart', e => { Snd.init(); const t = e.touches[0]; sx = t.clientX; sy = t.clientY; st = Date.now(); moved = 0; }, { passive: true });
+  cv.addEventListener('touchmove', e => {
+    if (over || paused) return;
+    const t = e.touches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    const step = cv.getBoundingClientRect().width / COLS;
+    if (Math.abs(dx) > step && Math.abs(dx) > Math.abs(dy)) { act[dx > 0 ? 'right' : 'left'](); sx = t.clientX; moved++; }
+    else if (dy > step * 0.8) { act.soft(true); setTimeout(() => act.soft(false), 220); sy = t.clientY; moved++; }
+    e.preventDefault();
+  }, { passive: false });
+  cv.addEventListener('touchend', e => {
+    if (over) { reset(); return; }
+    if (paused) return;
+    const dt = Date.now() - st, dy = e.changedTouches[0].clientY - sy;
+    if (!moved && dt < 250) act.rot();
+    else if (dy > cv.getBoundingClientRect().height * 0.28) act.hard();
+  }, { passive: true });
+})();
+
+function reset() {
+  board = blank(); score = 0; lines = 0; level = 1; window.level = 1;
+  ammo1 = 0; ammo2 = 0; over = false; paused = false;
+  gravity = 800; acc = 0; last = 0; missiles = []; shards = []; shake = 0; hardSlide = 0; softDrop = false;
+  next = null; spawn();
+  document.getElementById('over').classList.remove('on');
+}
+document.getElementById('again').onclick = () => { Snd.init(); reset(); };
+document.getElementById('restart').onclick = () => { Snd.init(); reset(); };
+document.getElementById('mute').onclick = () => {
+  Snd.init();
+  document.getElementById('mute').textContent = Snd.toggle() ? '🔊 소리 켜짐' : '🔇 소리 꺼짐';
+};
+reset();
+requestAnimationFrame(loop);
+</script></body></html>
