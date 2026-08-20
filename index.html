@@ -26,8 +26,8 @@
            background:linear-gradient(90deg,var(--violet),var(--pink)); font-family:inherit; font-size:14px; }
   button.ghost { background:#1f2937; border:1px solid var(--line); }
   /* 판 위에 떠 있는 상단 표시 — 좁은 화면에서 자리를 차지하지 않게 absolute */
-  .stage { position:relative; display:inline-block; line-height:0; }
-  .hud { position:absolute; left:6px; right:6px; top:6px; display:none; align-items:flex-start;
+  .stage { position:relative; display:inline-block; line-height:0; touch-action:none; }
+  .hud { position:absolute; left:6px; right:6px; top:6px; display:none; align-items:flex-start; touch-action:none;
          justify-content:space-between; gap:8px; z-index:3; pointer-events:none; line-height:1.25; }
   .hud .l { background:rgba(11,18,32,.72); border:1px solid var(--line); border-radius:9px; padding:4px 9px; }
   .hud .l { display:flex; align-items:center; gap:9px; }        /* 점수 옆에 '다음 블록' 미리보기 */
@@ -38,7 +38,7 @@
   .hud .r { display:flex; gap:6px; pointer-events:auto; }
   .hud .r button { width:auto; padding:6px 10px; font-size:12px; border-radius:9px; }
   .pad button span { font-size:12px; margin-left:3px; opacity:.9; }
-  .pad { display:none; gap:7px; margin:7px auto 0; }
+  .pad { display:none; gap:7px; margin:7px auto 0; touch-action:none; }
   .pad button { flex:1 1 0; padding:15px 0; font-size:19px; background:#1f2937; border:1px solid var(--line); }
   .pad button.f1 { background:linear-gradient(90deg,#f97316,#f59e0b); }
   .pad button.f2 { background:linear-gradient(90deg,#e11d48,#f43f5e); }
@@ -95,12 +95,12 @@
   </div>
 </div>
 <div class="pad">
-  <button id="bBoom" class="f2">💥<span id="a2">1</span></button>
   <button id="bFire" class="f1">🚀<span id="a1">3</span></button>
-  <button id="bRot">⟳</button><button id="bUndo">↩<span id="au">3</span></button>
+  <button id="bBoom" class="f2">💥<span id="a2">1</span></button>
+  <button id="bRot" class="w2">⟳</button>
 </div>
 <div class="pad">
-  <button id="bDrop" class="w2">⤓</button>
+  <button id="bDrop">⤓</button><button id="bUndo">↩<span id="au">3</span></button>
   <button id="bL">◀</button><button id="bR">▶</button>
 </div>
 <div class="start" id="start"><div class="b">
@@ -108,7 +108,7 @@
   <p>◆ 든 줄을 지우면 🚀 · ★ 든 줄을 지우면 💥<br>아래로 쏴서 막힌 자리를 뚫으세요<br><b>소리와 배경음이 함께 켜집니다</b></p>
   <button id="startBtn">▶ 탭해서 시작</button>
 </div></div>
-<div class="ver">v10</div>
+<div class="ver">v11</div>
 <div class="over" id="over"><div>
   <h1>게임 오버</h1><p id="final"></p>
   <button id="restart" style="width:180px;margin:0 auto">다시 하기</button>
@@ -740,6 +740,16 @@ document.getElementById('mute').onclick = () => {
   document.getElementById('mute').textContent = Snd.toggle() ? '🔊 소리 켜짐' : '🔇 소리 꺼짐';
 };
 reset();
+/* 두 번 두드리면 화면이 확대되는 것 차단 — iOS 는 maximum-scale 을 무시해서 CSS 만으로는 부족하다.
+   300ms 안에 들어온 두 번째 탭은 브라우저에게 넘기지 않는다. */
+let lastTapAt = 0;
+document.addEventListener('touchend', e => {
+  const t = Date.now();
+  if (t - lastTapAt < 320) e.preventDefault();
+  lastTapAt = t;
+}, { passive: false });
+document.addEventListener('dblclick', e => e.preventDefault());
+document.addEventListener('gesturestart', e => e.preventDefault());   // 사파리 핀치 확대
 // 길게 누르면 나오는 메뉴(우클릭/롱프레스)도 조작 영역에서는 막는다
 [...document.querySelectorAll('.pad button, .hud button, .stage, canvas')].forEach(el => {
   el.addEventListener('contextmenu', e => e.preventDefault());
