@@ -30,6 +30,9 @@
   .hud { position:absolute; left:6px; right:6px; top:6px; display:none; align-items:flex-start;
          justify-content:space-between; gap:8px; z-index:3; pointer-events:none; line-height:1.25; }
   .hud .l { background:rgba(11,18,32,.72); border:1px solid var(--line); border-radius:9px; padding:4px 9px; }
+  .hud .l { display:flex; align-items:center; gap:9px; }        /* 점수 옆에 '다음 블록' 미리보기 */
+  .hud .l .ln { line-height:1.2; }
+  .hud .l canvas { width:56px; height:34px; opacity:.95; }
   .hud .l b { font-size:19px; font-weight:800; }
   .hud .l span { font-size:11px; color:var(--muted); margin-left:6px; }
   .hud .r { display:flex; gap:6px; pointer-events:auto; }
@@ -68,7 +71,7 @@
   <div class="stage">
     <canvas id="cv" width="300" height="600"></canvas>
     <div class="hud">
-      <div class="l"><b id="hScore">0</b><span><span id="hLines">0</span>줄 · Lv<span id="hLevel">1</span></span></div>
+      <div class="l"><div class="ln"><b id="hScore">0</b><span><span id="hLines">0</span>줄 · Lv<span id="hLevel">1</span></span></div><canvas id="hNx" width="56" height="34" title="다음 블록"></canvas></div>
       <div class="r"><button id="bgmBtn" class="ghost">♪ 배경음</button><button id="againM">새 게임</button><button id="muteM" class="ghost">🔊</button></div>
     </div>
   </div>
@@ -105,7 +108,7 @@
   <p>◆ 든 줄을 지우면 🚀 · ★ 든 줄을 지우면 💥<br>아래로 쏴서 막힌 자리를 뚫으세요<br><b>소리와 배경음이 함께 켜집니다</b></p>
   <button id="startBtn">▶ 탭해서 시작</button>
 </div></div>
-<div class="ver">v8</div>
+<div class="ver">v9</div>
 <div class="over" id="over"><div>
   <h1>게임 오버</h1><p id="final"></p>
   <button id="restart" style="width:180px;margin:0 auto">다시 하기</button>
@@ -208,6 +211,15 @@ const Snd = {
       setTimeout(() => this.noise(0.1, 0.16, 700 + Math.random() * 2200, 250), C * 45 + i * 90);
     setTimeout(() => this.noise(0.7, 0.22, 600, 120), 120);      // 아래로 쏟아지는 잔향
   },
+  tetris() {                                    // 4줄 — 팡파르 + 큰 폭발 + 반짝임
+    if (!this.on || !this.ctx) return;
+    this.boom(true);
+    [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) =>
+      setTimeout(() => { this.tone(f, 0.5, 'triangle', 0.3); this.tone(f * 2, 0.3, 'square', 0.09); }, i * 85));
+    setTimeout(() => { this.tone(1046.5, 0.9, 'triangle', 0.26); this.tone(1568, 0.9, 'sine', 0.16); }, 470);
+    for (let i = 0; i < 12; i++)
+      setTimeout(() => this.tone(1800 + Math.random() * 2600, 0.09, 'sine', 0.06), 300 + i * 70);
+  },
   levelUp(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => this.tone(f, 0.12, 'triangle', 0.15), i * 60)); },
   over()   { [440, 392, 330, 262, 196].forEach((f, i) => setTimeout(() => this.tone(f, 0.28, 'sawtooth', 0.16), i * 130)); },
   /* 배경음 — 8분음표 격자에 베이스와 아르페지오를 얹은 짧은 루프. 레벨이 오르면 빨라진다. */
@@ -250,6 +262,7 @@ const KEYS = Object.keys(SHAPES);
 // 칸 값: 1=보통 2=◆(미사일) 3=★(대형미사일)
 let board, cur, next, score, lines, level, ammo1, ammo2, over, paused;
 let gravity, acc, last, missiles, shards, shake, hardSlide, softDrop;
+let flash = 0, banner = 0, sparks = [];   // 4줄 완성 연출 — 화면 번쩍임 · 배너 · 불꽃
 
 function blank() { return Array.from({ length: ROWS }, () => Array(COLS).fill(null)); }
 function newPiece() {
@@ -310,6 +323,22 @@ function shatterRow(y) {
   }
   capShards();
 }
+/* 4줄 연출용 불꽃 — 파편보다 밝고 크게, 사방으로 솟았다 떨어진다 */
+const SPARK = ['#fde047', '#f472b6', '#22d3ee', '#a3e635', '#fb923c', '#ffffff'];
+function sparkBurst(x, y) {
+  for (let i = 0; i < 6; i++) {
+    const a = Math.random() * Math.PI * 2, v = 2 + Math.random() * 5;
+    sparks.push({ x: x * CELL + CELL / 2, y: y * CELL + CELL / 2,
+      vx: Math.cos(a) * v, vy: Math.sin(a) * v - 3.5,
+      r: 2 + Math.random() * 3.5, life: 1, color: SPARK[(Math.random() * SPARK.length) | 0] });
+  }
+}
+function stepSparks(dt) {
+  const k = dt / 16.7;
+  for (const s of sparks) { s.vy += 0.22 * k; s.x += s.vx * k; s.y += s.vy * k; s.life -= dt / 1100; }
+  sparks = sparks.filter(s => s.life > 0 && s.y < cv.height + 40);
+}
+
 function stepShards(dt) {
   for (const s of shards) {
     if (s.delay > 0) { s.delay -= dt; continue; }
@@ -335,6 +364,12 @@ function clearLines() {
   for (const y of full) { board.splice(y, 1); board.unshift(Array(COLS).fill(null)); }
   lines += full.length;
   score += [0, 100, 300, 500, 800][full.length] || 800;
+  /* 🎆 4줄(테트리스) — 여기서만 크게 터뜨린다. 화면이 번쩍이고 불꽃이 솟고 배너가 튀어나온다. */
+  if (full.length >= 4) {
+    flash = 1; banner = 1; shake = 30; score += 1200;
+    for (const y of full) for (let x = 0; x < COLS; x++) sparkBurst(x, y);
+    Snd.tetris();
+  } else if (full.length === 3) { flash = 0.45; shake = 14; }
   ammo1 += got1; ammo2 += got2;
   const nl = Math.floor(lines / 10) + 1;
   if (nl !== level) { level = nl; window.level = level; Snd.levelUp(); }
@@ -444,6 +479,30 @@ function draw(sub) {
     ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, s.life));
     ctx.translate(s.x + (s.w || s.size) / 2, s.y + (s.h || s.size) / 2); ctx.rotate(s.rot);
     ctx.fillStyle = s.color; ctx.fillRect(-(s.w || s.size) / 2, -(s.h || s.size) / 2, (s.w || s.size) - 0.5, (s.h || s.size) - 0.5);
+  for (const s of sparks) {                                 // 🎆 불꽃
+    ctx.globalAlpha = Math.max(0, Math.min(1, s.life));
+    ctx.fillStyle = s.color;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r * (0.4 + s.life * 0.9), 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  if (flash > 0) {                                          // 화면 번쩍임
+    ctx.fillStyle = 'rgba(255,255,255,' + (flash * 0.5).toFixed(3) + ')';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+  }
+  if (banner > 0) {                                         // 가운데 배너 — 튀어나왔다 사라진다
+    const p = 1 - banner, sc = 0.6 + Math.min(1, p * 4) * 0.55 + p * 0.25;
+    ctx.save();
+    ctx.translate(cv.width / 2, cv.height * 0.42); ctx.scale(sc, sc);
+    ctx.globalAlpha = Math.min(1, banner * 2.2);
+    const grd = ctx.createLinearGradient(-130, 0, 130, 0);
+    grd.addColorStop(0, '#fde047'); grd.addColorStop(0.5, '#f472b6'); grd.addColorStop(1, '#22d3ee');
+    ctx.font = '900 46px Pretendard, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 8; ctx.strokeStyle = 'rgba(2,6,23,.85)'; ctx.strokeText('TETRIS!', 0, 0);
+    ctx.fillStyle = grd; ctx.fillText('TETRIS!', 0, 0);
+    ctx.font = '800 15px Pretendard, sans-serif'; ctx.fillStyle = '#e5e7eb';
+    ctx.fillText('+1200', 0, 38);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
     ctx.restore();
   }
   ctx.restore();
@@ -459,6 +518,20 @@ function draw(sub) {
   document.getElementById('level').textContent = level;
   document.getElementById('ammo1').textContent = ammo1;
   document.getElementById('ammo2').textContent = ammo2;
+  {  // 상단 좌측의 작은 '다음 블록'
+    const hn = document.getElementById('hNx'), hc = hn.getContext('2d');
+    hc.clearRect(0, 0, hn.width, hn.height);
+    if (next) {
+      const w = next.m[0].length, h2 = next.m.length, s = Math.min(8, (hn.width - 4) / w, (hn.height - 4) / h2);
+      const ox = (hn.width - w * s) / 2, oy = (hn.height - h2 * s) / 2;
+      next.m.forEach((row, y) => row.forEach((v, x) => {
+        if (!v) return;
+        hc.fillStyle = next.c; hc.fillRect(ox + x * s, oy + y * s, s - 1, s - 1);
+        if (v === 2 || v === 3) { hc.fillStyle = v === 3 ? '#7f1d1d' : '#0b1220';
+          hc.fillRect(ox + x * s + s * 0.3, oy + y * s + s * 0.3, s * 0.4, s * 0.4); }
+      }));
+    }
+  }
   document.getElementById('hScore').textContent = score;
   document.getElementById('hLines').textContent = lines;
   document.getElementById('hLevel').textContent = level;
@@ -487,6 +560,9 @@ function loop(t) {
     if (missiles.length) stepMissiles(dt);
   }
   if (shards.length) stepShards(dt);
+  if (sparks.length) stepSparks(dt);
+  if (flash > 0) flash = Math.max(0, flash - dt / 420);
+  if (banner > 0) banner = Math.max(0, banner - dt / 1400);
   if (shake > 0) shake = Math.max(0, shake - dt * 0.06);
   draw(sub);
   requestAnimationFrame(loop);
@@ -590,7 +666,7 @@ const nextBgm = () => { Snd.init(); bgmIdx = (bgmIdx + 1) % TRACKS.length; apply
 function reset() {
   board = blank(); score = 0; lines = 0; level = 1; window.level = 1;
   ammo1 = 3; ammo2 = 1;   /* 기본 지급 */ over = false; paused = false;
-  gravity = 800; acc = 0; last = 0; missiles = []; shards = []; shake = 0; hardSlide = 0; softDrop = false;
+  gravity = 800; acc = 0; last = 0; missiles = []; shards = []; sparks = []; flash = 0; banner = 0; shake = 0; hardSlide = 0; softDrop = false;
   next = null; spawn();
   document.getElementById('over').classList.remove('on');
 }
