@@ -97,7 +97,7 @@
 <div class="pad">
   <button id="bBoom" class="f2">💥<span id="a2">1</span></button>
   <button id="bFire" class="f1">🚀<span id="a1">3</span></button>
-  <button id="bRot" class="w2">⟳</button>
+  <button id="bRot">⟳</button><button id="bUndo">↩<span id="au">3</span></button>
 </div>
 <div class="pad">
   <button id="bDrop" class="w2">⤓</button>
@@ -108,7 +108,7 @@
   <p>◆ 든 줄을 지우면 🚀 · ★ 든 줄을 지우면 💥<br>아래로 쏴서 막힌 자리를 뚫으세요<br><b>소리와 배경음이 함께 켜집니다</b></p>
   <button id="startBtn">▶ 탭해서 시작</button>
 </div></div>
-<div class="ver">v9</div>
+<div class="ver">v10</div>
 <div class="over" id="over"><div>
   <h1>게임 오버</h1><p id="final"></p>
   <button id="restart" style="width:180px;margin:0 auto">다시 하기</button>
@@ -211,6 +211,15 @@ const Snd = {
       setTimeout(() => this.noise(0.1, 0.16, 700 + Math.random() * 2200, 250), C * 45 + i * 90);
     setTimeout(() => this.noise(0.7, 0.22, 600, 120), 120);      // 아래로 쏟아지는 잔향
   },
+  combo(c) {                                   // 콤보가 쌓일수록 음이 올라가고 소리가 두꺼워진다
+    if (!this.on || !this.ctx) return;
+    const step = Math.min(c, 8);
+    const base = 440 * Math.pow(1.12, step);
+    this.tone(base, 0.16, 'triangle', 0.18 + step * 0.02);
+    setTimeout(() => this.tone(base * 1.5, 0.16, 'square', 0.09 + step * 0.012), 80);
+    if (step >= 3) setTimeout(() => this.tone(base * 2, 0.22, 'sine', 0.12), 150);
+    if (step >= 5) this.noise(0.2, 0.25, 5200, 900);
+  },
   tetris() {                                    // 4줄 — 팡파르 + 큰 폭발 + 반짝임
     if (!this.on || !this.ctx) return;
     this.boom(true);
@@ -263,6 +272,8 @@ const KEYS = Object.keys(SHAPES);
 let board, cur, next, score, lines, level, ammo1, ammo2, over, paused;
 let gravity, acc, last, missiles, shards, shake, hardSlide, softDrop;
 let flash = 0, banner = 0, sparks = [];   // 4줄 완성 연출 — 화면 번쩍임 · 배너 · 불꽃
+let combo = 0, comboShow = 0;              // 연속으로 줄을 지운 횟수 (한 번이라도 못 지우면 0)
+let undoLeft = 3, undoStack = [];          // 무르기 — 방금 놓은 블록을 되돌린다
 
 function blank() { return Array.from({ length: ROWS }, () => Array(COLS).fill(null)); }
 function newPiece() {
@@ -300,7 +311,7 @@ function tryRotate() {                       // 벽에 붙어 있으면 한 칸 
    줄이 지워질 때 블록을 그대로 없애지 않고, 한 칸을 작은 파편 4개로 쪼개
    왼쪽부터 차례로 튀어오르며 떨어지게 한다 (글자가 조각나 흩어지듯). */
 function shatterCell(px, py, color, delay, power, burst) {
-  const NX = 8, NY = 4, qx = CELL / NX, qy = CELL / NY;   // 한 칸을 8x4 = 32 조각으로
+  const NX = shatterFine ? 8 : 3, NY = shatterFine ? 4 : 2, qx = CELL / NX, qy = CELL / NY;
   for (let iy = 0; iy < NY; iy++) for (let ix = 0; ix < NX; ix++) {
     // 가운데에서 바깥으로 밀려나듯 — 조각이 제자리에 뭉치지 않고 흩어진다
     const cx = (ix + 0.5) / NX - 0.5, cy = (iy + 0.5) / NY - 0.5;
@@ -315,7 +326,8 @@ function shatterCell(px, py, color, delay, power, burst) {
   }
 }
 // 한 번에 너무 많으면(4줄 동시 삭제 = 640조각) 폰에서 버벅인다 — 오래된 것부터 정리
-function capShards() { if (shards.length > 2400) shards.splice(0, shards.length - 2400); }
+function capShards() { if (shards.length > 700) shards.splice(0, shards.length - 700); }
+let shatterFine = true;                    // 여러 줄을 한 번에 지울 땐 조각을 굵게 (렉 방지)
 function shatterRow(y) {
   for (let x = 0; x < COLS; x++) {
     const c = board[y][x];
@@ -326,7 +338,7 @@ function shatterRow(y) {
 /* 4줄 연출용 불꽃 — 파편보다 밝고 크게, 사방으로 솟았다 떨어진다 */
 const SPARK = ['#fde047', '#f472b6', '#22d3ee', '#a3e635', '#fb923c', '#ffffff'];
 function sparkBurst(x, y) {
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 3; i++) {            // 칸당 3개 (예전 6개는 4줄에서 240개가 한꺼번에 생겼다)
     const a = Math.random() * Math.PI * 2, v = 2 + Math.random() * 5;
     sparks.push({ x: x * CELL + CELL / 2, y: y * CELL + CELL / 2,
       vx: Math.cos(a) * v, vy: Math.sin(a) * v - 3.5,
@@ -354,25 +366,29 @@ function stepShards(dt) {
 function clearLines() {
   const full = [];
   for (let y = 0; y < ROWS; y++) if (board[y].every(Boolean)) full.push(y);
-  if (!full.length) return;
+  if (!full.length) { combo = 0; return; }                   // 한 줄도 못 지우면 콤보 끊김
   let got1 = 0, got2 = 0;
+  shatterFine = full.length < 3;           // 3줄 이상이면 조각을 32개 → 6개로 (한 번에 1280개는 폰이 버벅인다)
   for (const y of full) {
     if (board[y].some(c => c && c.item === 2)) got1++;
     if (board[y].some(c => c && c.item === 3)) got2++;
     shatterRow(y);
   }
   for (const y of full) { board.splice(y, 1); board.unshift(Array(COLS).fill(null)); }
+  combo++; comboShow = 1;                                   // 연속 삭제 — 쉴 새 없이 지우면 점점 세진다
+  score += Math.max(0, combo - 1) * 120 * full.length;       // 콤보 보너스
   lines += full.length;
   score += [0, 100, 300, 500, 800][full.length] || 800;
   /* 🎆 4줄(테트리스) — 여기서만 크게 터뜨린다. 화면이 번쩍이고 불꽃이 솟고 배너가 튀어나온다. */
   if (full.length >= 4) {
     flash = 1; banner = 1; shake = 30; score += 1200;
-    for (const y of full) for (let x = 0; x < COLS; x++) sparkBurst(x, y);
+    for (const y of full) for (let x = 0; x < COLS; x += 2) sparkBurst(x, y);   // 한 칸 걸러 하나씩
     Snd.tetris();
-  } else if (full.length === 3) { flash = 0.45; shake = 14; }
+  } else { flash = Math.min(0.7, 0.12 * full.length + combo * 0.06); shake = Math.min(20, 4 * full.length + combo * 2); }
+  if (combo >= 2) Snd.combo(combo);                          // 콤보가 쌓일수록 높고 화려한 소리
   ammo1 += got1; ammo2 += got2;
   const nl = Math.floor(lines / 10) + 1;
-  if (nl !== level) { level = nl; window.level = level; Snd.levelUp(); }
+  if (nl !== level) { level = nl; window.level = level; undoLeft++; Snd.levelUp(); }   // 10줄마다 무르기 한 번 더
   gravity = Math.max(90, 800 - (level - 1) * 70);
   Snd.clear(full.length); Snd.crumble(full.length, COLS);
 }
@@ -394,6 +410,8 @@ function explode(row, col, big) {
     if (big && (y - row) * (y - row) + (x - col) * (x - col) > R * R + 1) continue;
     const c = board[y][x];
     if (!c) continue;
+    if (c.item === 2) ammo1++;              // ◆ 를 미사일로 깨도 한 발 돌려받는다
+    else if (c.item === 3) ammo2++;         // ★ 도 마찬가지
     shatterCell(x, y, c.c, 0, big ? 5 : 2.6, true);
     board[y][x] = null; hit++;
   }
@@ -422,7 +440,27 @@ function merge(p) {
     if (v && p.y + y >= 0) board[p.y + y][p.x + x] = { c: p.c, item: v };
   }));
 }
-function lock() { merge(cur); Snd.land(); clearLines(); spawn(); }
+/* ↩ 무르기 — 방금 놓은 블록을 통째로 되돌린다. 놓기 직전 판을 통째로 찍어 두었다가 복원한다. */
+function snapshot() {
+  undoStack.push({
+    board: board.map(r => r.map(c => (c ? { c: c.c, item: c.item } : null))),
+    score, lines, level, ammo1, ammo2, gravity,
+    piece: { k: cur.k, m: cur.m.map(r => r.slice()), c: cur.c, x: cur.x, y: cur.y },
+    next: { k: next.k, m: next.m.map(r => r.slice()), c: next.c, x: next.x, y: next.y },
+  });
+  if (undoStack.length > 5) undoStack.shift();
+}
+function undo() {
+  if (over || paused || !undoLeft || !undoStack.length) return;
+  const s = undoStack.pop();
+  board = s.board; score = s.score; lines = s.lines; level = s.level;
+  ammo1 = s.ammo1; ammo2 = s.ammo2; gravity = s.gravity;
+  cur = s.piece; next = s.next;
+  undoLeft--; acc = 0; hardSlide = 0; combo = 0;
+  shards = []; sparks = [];
+  Snd.tone(520, 0.12, 'triangle', 0.16, 300); Snd.tone(300, 0.14, 'square', 0.1, 520);
+}
+function lock() { snapshot(); merge(cur); Snd.land(); clearLines(); spawn(); }
 function spawn() {
   cur = next || newPiece(); next = newPiece(); acc = 0; hardSlide = 0;
   if (collide(cur, 0, 0)) {
@@ -489,6 +527,20 @@ function draw(sub) {
     ctx.fillStyle = 'rgba(255,255,255,' + (flash * 0.5).toFixed(3) + ')';
     ctx.fillRect(0, 0, cv.width, cv.height);
   }
+  if (comboShow > 0 && combo >= 2) {                        // 🔥 콤보 표시
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, comboShow * 1.6);
+    ctx.translate(cv.width / 2, cv.height * 0.22);
+    const sc = 1 + (1 - comboShow) * 0.5 + Math.min(combo, 8) * 0.05;
+    ctx.scale(sc, sc);
+    ctx.font = '900 30px Pretendard, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 7; ctx.strokeStyle = 'rgba(2,6,23,.8)';
+    const txt = combo + ' COMBO';
+    ctx.strokeText(txt, 0, 0);
+    ctx.fillStyle = combo >= 5 ? '#f43f5e' : (combo >= 3 ? '#fb923c' : '#fde047');
+    ctx.fillText(txt, 0, 0);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
   if (banner > 0) {                                         // 가운데 배너 — 튀어나왔다 사라진다
     const p = 1 - banner, sc = 0.6 + Math.min(1, p * 4) * 0.55 + p * 0.25;
     ctx.save();
@@ -537,6 +589,7 @@ function draw(sub) {
   document.getElementById('hLevel').textContent = level;
   document.getElementById('a1').textContent = ammo1;
   document.getElementById('a2').textContent = ammo2;
+  document.getElementById('au').textContent = undoLeft;
 }
 
 /* ─────────── 루프 ─────────── */
@@ -563,6 +616,7 @@ function loop(t) {
   if (sparks.length) stepSparks(dt);
   if (flash > 0) flash = Math.max(0, flash - dt / 420);
   if (banner > 0) banner = Math.max(0, banner - dt / 1400);
+  if (comboShow > 0) comboShow = Math.max(0, comboShow - dt / 900);
   if (shake > 0) shake = Math.max(0, shake - dt * 0.06);
   draw(sub);
   requestAnimationFrame(loop);
@@ -595,6 +649,7 @@ addEventListener('keydown', e => {
   else if (e.code === 'Space') act.hard();
   else if (k === 'f') { if (!e.repeat) act.fire(); }        // 꾹 눌러도 한 발만
   else if (k === 'g') { if (!e.repeat) act.boom(); }
+  else if (k === 'z') { if (!e.repeat) undo(); }
   else return;
   e.preventDefault();
 });
@@ -612,7 +667,7 @@ const hold = (id, fn, repeat, upFn) => {                 // 📱 버튼 — 꾹 
 };
 hold('bL', act.left, true); hold('bR', act.right, true); hold('bRot', act.rot, false);
 hold('bDown', () => act.soft(true), false, () => act.soft(false));
-hold('bDrop', act.hard, false); hold('bFire', act.fire, false); hold('bBoom', act.boom, false);
+hold('bDrop', act.hard, false); hold('bFire', act.fire, false); hold('bBoom', act.boom, false); hold('bUndo', () => undo(), false);
 
 (() => {                                                  // 📱 판 위 스와이프
   let sx = 0, sy = 0, st = 0, moved = 0;
@@ -665,7 +720,7 @@ const nextBgm = () => { Snd.init(); bgmIdx = (bgmIdx + 1) % TRACKS.length; apply
 
 function reset() {
   board = blank(); score = 0; lines = 0; level = 1; window.level = 1;
-  ammo1 = 3; ammo2 = 1;   /* 기본 지급 */ over = false; paused = false;
+  ammo1 = 3; ammo2 = 1; undoLeft = 3; undoStack = []; combo = 0; comboShow = 0;   /* 기본 지급 */ over = false; paused = false;
   gravity = 800; acc = 0; last = 0; missiles = []; shards = []; sparks = []; flash = 0; banner = 0; shake = 0; hardSlide = 0; softDrop = false;
   next = null; spawn();
   document.getElementById('over').classList.remove('on');
