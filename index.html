@@ -108,7 +108,7 @@
   <p>◆ 든 줄을 지우면 🚀 · ★ 든 줄을 지우면 💥<br>아래로 쏴서 막힌 자리를 뚫으세요<br><b>소리와 배경음이 함께 켜집니다</b></p>
   <button id="startBtn">▶ 탭해서 시작</button>
 </div></div>
-<div class="ver">v11</div>
+<div class="ver">v12</div>
 <div class="over" id="over"><div>
   <h1>게임 오버</h1><p id="final"></p>
   <button id="restart" style="width:180px;margin:0 auto">다시 하기</button>
@@ -190,8 +190,8 @@ const Snd = {
     this.noise(0.9, 0.95, 4200, 70);
     setTimeout(() => this.noise(0.7, 0.5, 1600, 60), 90);
     // ④ 잔해 — 사방으로 흩어지는 꼬리
-    for (let i = 0; i < 10; i++)
-      setTimeout(() => this.noise(0.12, 0.22, 900 + Math.random() * 3500, 200), 160 + i * 70 + Math.random() * 60);
+    for (let i = 0; i < 5; i++)
+      setTimeout(() => this.noise(0.12, 0.22, 900 + Math.random() * 3500, 200), 160 + i * 120 + Math.random() * 60);
   },
   /* 바스러짐 — 한 줄을 한 번에 '퍽' 하고 끝내지 않고, 블록 한 칸마다 소리를 내서
      조각이 다 떨어질 때까지 자글자글 이어지게 한다. cols·rows 만큼 촘촘해진다. */
@@ -200,14 +200,17 @@ const Snd = {
     const R = Math.max(1, rows || 1), C = cols || 10;
     this.noise(0.16, 0.5, 3000, 700);                          // 갈라지는 첫 소리
     this.tone(150, 0.18, 'square', 0.18, 60);
-    for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {   // 블록 한 칸마다 — 왼쪽부터 차례로
+    const maxTicks = 14;                                        // 소리 알갱이 상한 (많으면 렉)
+    let ticks = 0;
+    for (let r = 0; r < R && ticks < maxTicks; r++) for (let c = 0; c < C && ticks < maxTicks; c++) {
+      ticks++;
       const at = c * 45 + r * 24 + Math.random() * 25;          // 파편이 부서지는 순서와 같은 간격
       setTimeout(() => {
         this.noise(0.07, 0.30, 1800 + Math.random() * 4200, 400);
         if (Math.random() < 0.4) this.tone(300 + Math.random() * 900, 0.05, 'triangle', 0.07);
       }, at);
     }
-    for (let i = 0; i < 8; i++)                                  // 다 떨어질 때까지 이어지는 잔조각
+    for (let i = 0; i < 4; i++)                                  // 다 떨어질 때까지 이어지는 잔조각
       setTimeout(() => this.noise(0.1, 0.16, 700 + Math.random() * 2200, 250), C * 45 + i * 90);
     setTimeout(() => this.noise(0.7, 0.22, 600, 120), 120);      // 아래로 쏟아지는 잔향
   },
@@ -226,8 +229,8 @@ const Snd = {
     [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) =>
       setTimeout(() => { this.tone(f, 0.5, 'triangle', 0.3); this.tone(f * 2, 0.3, 'square', 0.09); }, i * 85));
     setTimeout(() => { this.tone(1046.5, 0.9, 'triangle', 0.26); this.tone(1568, 0.9, 'sine', 0.16); }, 470);
-    for (let i = 0; i < 12; i++)
-      setTimeout(() => this.tone(1800 + Math.random() * 2600, 0.09, 'sine', 0.06), 300 + i * 70);
+    for (let i = 0; i < 5; i++)
+      setTimeout(() => this.tone(1800 + Math.random() * 2600, 0.09, 'sine', 0.06), 300 + i * 110);
   },
   levelUp(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => this.tone(f, 0.12, 'triangle', 0.15), i * 60)); },
   over()   { [440, 392, 330, 262, 196].forEach((f, i) => setTimeout(() => this.tone(f, 0.28, 'sawtooth', 0.16), i * 130)); },
@@ -271,7 +274,7 @@ const KEYS = Object.keys(SHAPES);
 // 칸 값: 1=보통 2=◆(미사일) 3=★(대형미사일)
 let board, cur, next, score, lines, level, ammo1, ammo2, over, paused;
 let gravity, acc, last, missiles, shards, shake, hardSlide, softDrop;
-let flash = 0, banner = 0, sparks = [];   // 4줄 완성 연출 — 화면 번쩍임 · 배너 · 불꽃
+let flash = 0, banner = 0, sparks = [], bannerGrad = null;   // 4줄 완성 연출 — 화면 번쩍임 · 배너 · 불꽃
 let combo = 0, comboShow = 0;              // 연속으로 줄을 지운 횟수 (한 번이라도 못 지우면 0)
 let undoLeft = 3, undoStack = [];          // 무르기 — 방금 놓은 블록을 되돌린다
 
@@ -311,7 +314,7 @@ function tryRotate() {                       // 벽에 붙어 있으면 한 칸 
    줄이 지워질 때 블록을 그대로 없애지 않고, 한 칸을 작은 파편 4개로 쪼개
    왼쪽부터 차례로 튀어오르며 떨어지게 한다 (글자가 조각나 흩어지듯). */
 function shatterCell(px, py, color, delay, power, burst) {
-  const NX = shatterFine ? 8 : 3, NY = shatterFine ? 4 : 2, qx = CELL / NX, qy = CELL / NY;
+  const NX = shatterFine ? 8 : 2, NY = shatterFine ? 4 : 2, qx = CELL / NX, qy = CELL / NY;
   for (let iy = 0; iy < NY; iy++) for (let ix = 0; ix < NX; ix++) {
     // 가운데에서 바깥으로 밀려나듯 — 조각이 제자리에 뭉치지 않고 흩어진다
     const cx = (ix + 0.5) / NX - 0.5, cy = (iy + 0.5) / NY - 0.5;
@@ -326,7 +329,7 @@ function shatterCell(px, py, color, delay, power, burst) {
   }
 }
 // 한 번에 너무 많으면(4줄 동시 삭제 = 640조각) 폰에서 버벅인다 — 오래된 것부터 정리
-function capShards() { if (shards.length > 700) shards.splice(0, shards.length - 700); }
+function capShards() { if (shards.length > 420) shards.splice(0, shards.length - 420); }
 let shatterFine = true;                    // 여러 줄을 한 번에 지울 땐 조각을 굵게 (렉 방지)
 function shatterRow(y) {
   for (let x = 0; x < COLS; x++) {
@@ -338,7 +341,7 @@ function shatterRow(y) {
 /* 4줄 연출용 불꽃 — 파편보다 밝고 크게, 사방으로 솟았다 떨어진다 */
 const SPARK = ['#fde047', '#f472b6', '#22d3ee', '#a3e635', '#fb923c', '#ffffff'];
 function sparkBurst(x, y) {
-  for (let i = 0; i < 3; i++) {            // 칸당 3개 (예전 6개는 4줄에서 240개가 한꺼번에 생겼다)
+  for (let i = 0; i < 2; i++) {            // 칸당 2개 — 4줄이면 40개 정도만 (많으면 폰이 버벅인다)
     const a = Math.random() * Math.PI * 2, v = 2 + Math.random() * 5;
     sparks.push({ x: x * CELL + CELL / 2, y: y * CELL + CELL / 2,
       vx: Math.cos(a) * v, vy: Math.sin(a) * v - 3.5,
@@ -382,7 +385,7 @@ function clearLines() {
   /* 🎆 4줄(테트리스) — 여기서만 크게 터뜨린다. 화면이 번쩍이고 불꽃이 솟고 배너가 튀어나온다. */
   if (full.length >= 4) {
     flash = 1; banner = 1; shake = 30; score += 1200;
-    for (const y of full) for (let x = 0; x < COLS; x += 2) sparkBurst(x, y);   // 한 칸 걸러 하나씩
+    for (const y of full) for (let x = 1; x < COLS; x += 3) sparkBurst(x, y);   // 세 칸에 하나씩
     Snd.tetris();
   } else { flash = Math.min(0.7, 0.12 * full.length + combo * 0.06); shake = Math.min(20, 4 * full.length + combo * 2); }
   if (combo >= 2) Snd.combo(combo);                          // 콤보가 쌓일수록 높고 화려한 소리
@@ -455,8 +458,14 @@ function undo() {
   const s = undoStack.pop();
   board = s.board; score = s.score; lines = s.lines; level = s.level;
   ammo1 = s.ammo1; ammo2 = s.ammo2; gravity = s.gravity;
-  cur = s.piece; next = s.next;
-  undoLeft--; acc = 0; hardSlide = 0; combo = 0;
+  next = s.next;
+  /* 되돌린 조각은 '떨어지던 자리' 가 아니라 맨 위에서 다시 시작한다.
+     바닥에 닿은 그 자리에 그대로 돌려놓으면 다음 순간 중력이 다시 눌러 붙여서,
+     화면에는 블록이 그대로 남아 있는 것처럼 보였다. */
+  cur = { k: s.piece.k, m: s.piece.m, c: s.piece.c,
+          x: ((COLS - s.piece.m[0].length) / 2) | 0, y: 0 };
+  while (collide(cur, 0, 0) && cur.y > -2) cur.y--;      // 맨 위가 막혀 있으면 살짝 위로
+  undoLeft--; acc = 0; hardSlide = 0; softDrop = false; combo = 0;
   shards = []; sparks = [];
   Snd.tone(520, 0.12, 'triangle', 0.16, 300); Snd.tone(300, 0.14, 'square', 0.1, 520);
 }
@@ -534,11 +543,10 @@ function draw(sub) {
     const sc = 1 + (1 - comboShow) * 0.5 + Math.min(combo, 8) * 0.05;
     ctx.scale(sc, sc);
     ctx.font = '900 30px Pretendard, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.lineWidth = 7; ctx.strokeStyle = 'rgba(2,6,23,.8)';
     const txt = combo + ' COMBO';
-    ctx.strokeText(txt, 0, 0);
+    ctx.shadowColor = 'rgba(2,6,23,.9)'; ctx.shadowBlur = 6;
     ctx.fillStyle = combo >= 5 ? '#f43f5e' : (combo >= 3 ? '#fb923c' : '#fde047');
-    ctx.fillText(txt, 0, 0);
+    ctx.fillText(txt, 0, 0); ctx.shadowBlur = 0;
     ctx.restore(); ctx.globalAlpha = 1;
   }
   if (banner > 0) {                                         // 가운데 배너 — 튀어나왔다 사라진다
@@ -546,8 +554,10 @@ function draw(sub) {
     ctx.save();
     ctx.translate(cv.width / 2, cv.height * 0.42); ctx.scale(sc, sc);
     ctx.globalAlpha = Math.min(1, banner * 2.2);
-    const grd = ctx.createLinearGradient(-130, 0, 130, 0);
-    grd.addColorStop(0, '#fde047'); grd.addColorStop(0.5, '#f472b6'); grd.addColorStop(1, '#22d3ee');
+    const grd = bannerGrad || (bannerGrad = (() => {           // 한 번만 만들어 재사용
+      const g2 = ctx.createLinearGradient(-130, 0, 130, 0);
+      g2.addColorStop(0, '#fde047'); g2.addColorStop(0.5, '#f472b6'); g2.addColorStop(1, '#22d3ee');
+      return g2; })());
     ctx.font = '900 46px Pretendard, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.lineWidth = 8; ctx.strokeStyle = 'rgba(2,6,23,.85)'; ctx.strokeText('TETRIS!', 0, 0);
     ctx.fillStyle = grd; ctx.fillText('TETRIS!', 0, 0);
