@@ -56,6 +56,16 @@
   .over div { text-align:center; }
   .over h1 { margin:0 0 6px; font-size:30px; }
   .over p { color:var(--muted); margin:0 0 14px; }
+  .over .ovbox { width:min(92vw,340px); }
+  .over .share { margin:0 0 12px; display:flex; flex-direction:column; gap:7px; }
+  .over .share input { width:100%; padding:10px 12px; border-radius:9px; border:1px solid var(--line);
+                       background:var(--bg); color:var(--fg); font-family:inherit; font-size:14px; text-align:center; }
+  .over .share input:focus { outline:none; border-color:var(--violet); }
+  .over .smsg { font-size:12px; color:#4ade80; min-height:16px; }
+  /* 남이 보낸 기록에 도전할 때 시작 화면에 뜨는 줄 */
+  .chal { margin:0 0 14px; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.6;
+          background:rgba(138,56,245,.16); border:1px solid var(--violet); }
+  .chal b { color:#fde047; font-size:17px; }
   @media (max-width: 760px), (pointer: coarse) {
     body { display:block; overflow:hidden; }
     .wrap { flex-direction:column; align-items:center; gap:0; padding:4px 4px 0; }
@@ -106,12 +116,18 @@
 <div class="start" id="start"><div class="b">
   <h1>미사일 테트리스</h1>
   <p>◆ 든 줄을 지우면 🚀 · ★ 든 줄을 지우면 💥<br>아래로 쏴서 막힌 자리를 뚫으세요<br><b>소리와 배경음이 함께 켜집니다</b></p>
+  <div id="chal" class="chal" style="display:none"></div>
   <button id="startBtn">▶ 탭해서 시작</button>
 </div></div>
-<div class="ver">v13</div>
-<div class="over" id="over"><div>
-  <h1>게임 오버</h1><p id="final"></p>
-  <button id="restart" style="width:180px;margin:0 auto">다시 하기</button>
+<div class="ver">v14</div>
+<div class="over" id="over"><div class="ovbox">
+  <h1 id="ovTitle">게임 오버</h1><p id="final"></p>
+  <div class="share">
+    <input id="nick" maxlength="12" placeholder="이름 (공유에 표시)">
+    <button id="shareBtn">📤 점수 공유하기</button>
+    <div id="shareMsg" class="smsg"></div>
+  </div>
+  <button id="restart">다시 하기</button>
 </div></div>
 <script>
 /* ─────────── 판 크기 ─────────── */
@@ -290,6 +306,7 @@ const KEYS = Object.keys(SHAPES);
 let board, cur, next, score, lines, level, ammo1, ammo2, over, paused;
 let gravity, acc, last, missiles, shards, shake, hardSlide, softDrop;
 let flash = 0, banner = 0, sparks = [], bannerGrad = null;   // 4줄 완성 연출 — 화면 번쩍임 · 배너 · 불꽃
+let bannerKind = 'tetris';                                   // 배너 문구 — 'tetris' | 'beat'
 let combo = 0, comboShow = 0;              // 연속으로 줄을 지운 횟수 (한 번이라도 못 지우면 0)
 let undoLeft = 3, undoStack = [];          // 무르기 — 방금 놓은 블록을 되돌린다
 
@@ -399,7 +416,7 @@ function clearLines() {
   score += [0, 100, 300, 500, 800][full.length] || 800;
   /* 🎆 4줄(테트리스) — 여기서만 크게 터뜨린다. 화면이 번쩍이고 불꽃이 솟고 배너가 튀어나온다. */
   if (full.length >= 4) {
-    flash = 1; banner = 1; shake = 30; score += 1200;
+    flash = 1; banner = 1; bannerKind = 'tetris'; shake = 30; score += 1200;
     for (const y of full) for (let x = 1; x < COLS; x += 3) sparkBurst(x, y);   // 세 칸에 하나씩
     Snd.tetris();
   } else { flash = Math.min(0.7, 0.12 * full.length + combo * 0.06); shake = Math.min(20, 4 * full.length + combo * 2); }
@@ -490,7 +507,13 @@ function spawn() {
   if (collide(cur, 0, 0)) {
     over = true; Snd.over();
     document.getElementById('over').classList.add('on');
-    document.getElementById('final').textContent = '점수 ' + score + ' · ' + lines + '줄 · Lv' + level;
+    const fin = document.getElementById('final'), tit = document.getElementById('ovTitle');
+    fin.textContent = '점수 ' + score.toLocaleString() + ' · ' + lines + '줄 · Lv' + level;
+    if (challenge.score) {                            // 도전 판이면 승패까지 알려 준다
+      const who = challenge.name || '상대';
+      if (score > challenge.score) { tit.textContent = '🏆 기록 경신!'; fin.textContent += ' — ' + who + ' 기록 ' + challenge.score.toLocaleString() + '점 넘음'; }
+      else { tit.textContent = '게임 오버'; fin.textContent += ' — ' + who + ' 기록까지 ' + (challenge.score - score).toLocaleString() + '점'; }
+    } else tit.textContent = '게임 오버';
   }
 }
 function stepDown() { if (collide(cur, 0, 1)) lock(); else cur.y++; }
@@ -539,6 +562,8 @@ function draw(sub) {
     ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, s.life));
     ctx.translate(s.x + (s.w || s.size) / 2, s.y + (s.h || s.size) / 2); ctx.rotate(s.rot);
     ctx.fillStyle = s.color; ctx.fillRect(-(s.w || s.size) / 2, -(s.h || s.size) / 2, (s.w || s.size) - 0.5, (s.h || s.size) - 0.5);
+    ctx.restore();
+  }
   for (const s of sparks) {                                 // 🎆 불꽃
     ctx.globalAlpha = Math.max(0, Math.min(1, s.life));
     ctx.fillStyle = s.color;
@@ -572,13 +597,12 @@ function draw(sub) {
       g2.addColorStop(0, '#fde047'); g2.addColorStop(0.5, '#f472b6'); g2.addColorStop(1, '#22d3ee');
       return g2; })());
     ctx.font = '900 46px Pretendard, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.lineWidth = 8; ctx.strokeStyle = 'rgba(2,6,23,.85)'; ctx.strokeText('TETRIS!', 0, 0);
-    ctx.fillStyle = grd; ctx.fillText('TETRIS!', 0, 0);
+    const bText = bannerKind === 'beat' ? '기록 경신!' : 'TETRIS!';
+    ctx.lineWidth = 8; ctx.strokeStyle = 'rgba(2,6,23,.85)'; ctx.strokeText(bText, 0, 0);
+    ctx.fillStyle = grd; ctx.fillText(bText, 0, 0);
     ctx.font = '800 15px Pretendard, sans-serif'; ctx.fillStyle = '#e5e7eb';
-    ctx.fillText('+1200', 0, 38);
+    ctx.fillText(bannerKind === 'beat' ? (challenge.name || '상대') + ' 기록 돌파' : '+1200', 0, 38);
     ctx.restore(); ctx.globalAlpha = 1;
-  }
-    ctx.restore();
   }
   ctx.restore();
 
@@ -642,6 +666,9 @@ function loop(t) {
   if (shards.length) stepShards(dt);
   if (sparks.length) stepSparks(dt);
   if (flash > 0) flash = Math.max(0, flash - dt / 420);
+  if (challenge.score && !beaten && score > challenge.score) {   // 상대 기록 돌파 — 그 자리에서 터뜨린다
+    beaten = true; banner = 1; bannerKind = 'beat'; flash = 0.6; shake = 18; Snd.tetris();
+  }
   if (banner > 0) banner = Math.max(0, banner - dt / 1400);
   if (comboShow > 0) comboShow = Math.max(0, comboShow - dt / 900);
   if (shake > 0) shake = Math.max(0, shake - dt * 0.06);
@@ -745,10 +772,46 @@ function applyBgm() {
 }
 const nextBgm = () => { Snd.init(); bgmIdx = (bgmIdx + 1) % TRACKS.length; applyBgm(); };
 
+/* ─────────── 점수 공유 · 도전 ───────────
+   게임이 끝나면 링크를 만들어 남에게 보낸다. 받은 사람이 그 링크로 들어오면
+   보낸 사람의 기록이 시작 화면에 뜨고, 넘어서면 그 자리에서 알려 준다. 서버는 필요 없다. */
+const qs = new URLSearchParams(location.search);
+const challenge = { score: Math.max(0, parseInt(qs.get('s') || '0', 10) || 0),
+                    name: (qs.get('n') || '').slice(0, 12) };
+let beaten = false;                                   // 이번 판에서 상대 기록을 넘었는가
+const nickEl = document.getElementById('nick');
+try { nickEl.value = localStorage.getItem('mt_nick') || ''; } catch (e) {}
+function shareLink() {
+  const nm = (nickEl.value || '').trim().slice(0, 12);
+  try { localStorage.setItem('mt_nick', nm); } catch (e) {}
+  const u = new URL(location.href.split('?')[0]);
+  u.searchParams.set('s', String(score));
+  if (nm) u.searchParams.set('n', nm);
+  return { url: u.toString(),
+           text: (nm ? nm + '님이 ' : '') + score.toLocaleString() + '점! 미사일 테트리스로 넘어보세요 🚀' };
+}
+async function doShare() {
+  const { url, text } = shareLink();
+  const msg = document.getElementById('shareMsg');
+  try {
+    if (navigator.share) { await navigator.share({ title: '미사일 테트리스', text, url }); msg.textContent = '보냈습니다'; return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; }        // 사용자가 공유창을 닫은 것뿐
+  try { await navigator.clipboard.writeText(text + '\n' + url); msg.textContent = '링크를 복사했어요 — 붙여넣기 하세요'; }
+  catch (e) { msg.textContent = url; }
+}
+function showChallenge() {                            // 시작 화면 — 남이 보낸 기록 안내
+  const box = document.getElementById('chal');
+  if (!challenge.score) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  box.innerHTML = (challenge.name ? '“' + challenge.name.replace(/[<>&"']/g, '') + '”님의 기록' : '받은 기록') +
+                  '<br><b>' + challenge.score.toLocaleString() + '점</b> 을 넘어보세요';
+}
+
 function reset() {
   board = blank(); score = 0; lines = 0; level = 1; window.level = 1;
   ammo1 = 3; ammo2 = 1; undoLeft = 3; undoStack = []; combo = 0; comboShow = 0;   /* 기본 지급 */ over = false; paused = false;
   gravity = 800; acc = 0; last = 0; missiles = []; shards = []; sparks = []; flash = 0; banner = 0; shake = 0; hardSlide = 0; softDrop = false;
+  beaten = false;
   next = null; spawn();
   document.getElementById('over').classList.remove('on');
 }
@@ -804,6 +867,8 @@ const startGame = () => {                       // 첫 탭 — 여기서 소리�
   startEl.classList.add('off');
   reset();
 };
+document.getElementById('shareBtn').onclick = doShare;
+showChallenge();
 document.getElementById('startBtn').onclick = startGame;
 startEl.addEventListener('pointerdown', e => { if (e.target.id !== 'startBtn') startGame(); });
 requestAnimationFrame(loop);
